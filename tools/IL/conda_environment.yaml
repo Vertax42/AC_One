@@ -1,0 +1,11 @@
+name: act
+channels:
+  - defaults
+  - conda-forge
+  - nvidia
+dependencies:
+  - python=3.10
+  - cuda=12.8
+  - pip
+  - pip:
+      - --extra-index-url https://download.pytorch.org/whl/cu128
