@@ -467,18 +467,18 @@ class RosOperator(Node):
 
             # JointControl topic
             if len(left_arm) == 7:
-                joint_state_msg = self.robot_status()
+                left_joint_state_msg = self.robot_status()
+                right_joint_state_msg = self.robot_status()
             else:
                 print("\033[31mInvalid joint length\033[0m")
 
                 return
 
-            joint_state_msg.joint_pos = np.asarray(left_arm, dtype=np.float64)
-            self.controller_arm_left_publisher.publish(joint_state_msg)
-            rate.sleep()
+            left_joint_state_msg.joint_pos = np.asarray(left_arm, dtype=np.float64)
+            right_joint_state_msg.joint_pos = np.asarray(right_arm, dtype=np.float64)
 
-            joint_state_msg.joint_pos = np.asarray(right_arm, dtype=np.float64)
-            self.controller_arm_right_publisher.publish(joint_state_msg)
+            self.controller_arm_left_publisher.publish(left_joint_state_msg)
+            self.controller_arm_right_publisher.publish(right_joint_state_msg)
 
             step += 1
             print("arm_publish_continuous:", step)

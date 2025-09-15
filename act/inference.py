@@ -15,8 +15,8 @@ import os
 import sys
 
 # 设置标准输出和标准错误的缓冲模式为行缓冲，确保实时输出
-sys.stdout = open(sys.stdout.fileno(), mode='w', buffering=1)
-sys.stderr = open(sys.stderr.fileno(), mode='w', buffering=1)
+sys.stdout = open(sys.stdout.fileno(), mode="w", buffering=1)
+sys.stderr = open(sys.stderr.fileno(), mode="w", buffering=1)
 
 from pathlib import Path
 
@@ -73,7 +73,7 @@ def load_yaml(yaml_file):
         dict: 解析后的配置字典，出错时返回None
     """
     try:
-        with open(yaml_file, 'r', encoding='utf-8') as file:
+        with open(yaml_file, "r", encoding="utf-8") as file:
             return yaml.safe_load(file)
     except FileNotFoundError:
         print(f"Error: File not found - {yaml_file}")
@@ -139,7 +139,7 @@ def create_shm_dict(config, shm_name_dict, shapes, dtypes):
         shm_dict[state_key] = (shm, shape, np.float32)
 
     # 为动作数据创建共享内存
-    action_shape = config['policy_config']['action_dim']
+    action_shape = config["policy_config"]["action_dim"]
     size = np.prod(action_shape) * np.dtype(np.float32).itemsize
     shm = SharedMemory(name=shm_name_dict["action"], create=True, size=size)
     shm_dict["action"] = (shm, action_shape, np.float32)
@@ -174,7 +174,7 @@ def connect_shm_dict(shm_name_dict, shapes, dtypes, config):
         shm_dict[state_key] = (shm, shape, np.float32)
 
     # 连接动作共享内存
-    action_shape = (config['policy_config']['action_dim'],)
+    action_shape = (config["policy_config"]["action_dim"],)
     shm = SharedMemory(name=shm_name_dict["action"], create=False)
     shm_dict["action"] = (shm, action_shape, np.float32)
 
@@ -210,93 +210,90 @@ def get_model_config(args):
 
     # 基础配置，所有策略都会使用
     base_config = {
-        'lr': args.lr,
-        'lr_backbone': args.lr_backbone,
-        'weight_decay': args.weight_decay,
-        'loss_function': args.loss_function,
-
-        'backbone': args.backbone,
-        'chunk_size': args.chunk_size,
-        'hidden_dim': args.hidden_dim,
-
-        'camera_names': args.camera_names,
-
-        'position_embedding': args.position_embedding,
-        'masks': args.masks,
-        'dilation': args.dilation,
-
-        'use_base': args.use_base,
-
-        'use_depth_image': args.use_depth_image,
+        "lr": args.lr,
+        "lr_backbone": args.lr_backbone,
+        "weight_decay": args.weight_decay,
+        "loss_function": args.loss_function,
+        "backbone": args.backbone,
+        "chunk_size": args.chunk_size,
+        "hidden_dim": args.hidden_dim,
+        "camera_names": args.camera_names,
+        "position_embedding": args.position_embedding,
+        "masks": args.masks,
+        "dilation": args.dilation,
+        "use_base": args.use_base,
+        "use_depth_image": args.use_depth_image,
     }
 
     # 根据策略类型配置特定参数
-    if args.policy_class == 'ACT':
+    if args.policy_class == "ACT":
         # ACT（Action Chunking with Transformers）策略配置
         policy_config = {
             **base_config,
-            'enc_layers': args.enc_layers,      # 编码器层数
-            'dec_layers': args.dec_layers,      # 解码器层数
-            'nheads': args.nheads,              # 注意力头数
-            'dropout': args.dropout,            # Dropout率
-            'pre_norm': args.pre_norm,          # 预归一化
-            'states_dim': 7,                    # 基础状态维度（单臂7个关节）
-            'action_dim': 7,                    # 基础动作维度（单臂7个关节）
-            'kl_weight': args.kl_weight,        # KL散度权重
-            'dim_feedforward': args.dim_feedforward,  # 前馈网络维度
-
-            'use_qvel': args.use_qvel,          # 是否使用关节速度
-            'use_effort': args.use_effort,      # 是否使用关节力矩
-            'use_eef_states': args.use_eef_states,  # 是否使用末端执行器状态
+            "enc_layers": args.enc_layers,  # 编码器层数
+            "dec_layers": args.dec_layers,  # 解码器层数
+            "nheads": args.nheads,  # 注意力头数
+            "dropout": args.dropout,  # Dropout率
+            "pre_norm": args.pre_norm,  # 预归一化
+            "states_dim": 7,  # 基础状态维度（单臂7个关节）
+            "action_dim": 7,  # 基础动作维度（单臂7个关节）
+            "kl_weight": args.kl_weight,  # KL散度权重
+            "dim_feedforward": args.dim_feedforward,  # 前馈网络维度
+            "use_qvel": args.use_qvel,  # 是否使用关节速度
+            "use_effort": args.use_effort,  # 是否使用关节力矩
+            "use_eef_states": args.use_eef_states,  # 是否使用末端执行器状态
         }
 
         # 动态更新状态维度
-        policy_config['states_dim'] += policy_config['action_dim'] if args.use_qvel else 0
-        policy_config['states_dim'] += 1 if args.use_effort else 0
-        policy_config['states_dim'] *= 2  # 双臂系统
+        policy_config["states_dim"] += (
+            policy_config["action_dim"] if args.use_qvel else 0
+        )
+        policy_config["states_dim"] += 1 if args.use_effort else 0
+        policy_config["states_dim"] *= 2  # 双臂系统
 
         # 动态更新动作维度
-        policy_config['action_dim'] *= 2  # 双臂预测（左臂+右臂）
-        policy_config['action_dim'] += 10 if args.use_base else 0  # 移动底盘
-        policy_config['action_dim'] *= 2  # 再次乘2（可能用于不同的动作表示）
+        policy_config["action_dim"] *= 2  # 双臂预测（左臂+右臂）
+        policy_config["action_dim"] += 10 if args.use_base else 0  # 移动底盘
+        policy_config["action_dim"] *= 2  # 再次乘2（可能用于不同的动作表示）
 
         action_dim = policy_config["action_dim"]
-        states_dim = policy_config['states_dim']
-        print(f'{action_dim=}', f'{states_dim=}')
+        states_dim = policy_config["states_dim"]
+        print(f"{action_dim=}", f"{states_dim=}")
 
-    elif args.policy_class == 'CNNMLP':
+    elif args.policy_class == "CNNMLP":
         # CNN-MLP策略配置（简单的卷积+多层感知机）
         policy_config = {
             **base_config,
-            'action_dim': 14,    # 固定14维动作
-            'states_dim': 14,    # 固定14维状态
+            "action_dim": 14,  # 固定14维动作
+            "states_dim": 14,  # 固定14维状态
         }
-    elif args.policy_class == 'Diffusion':
+    elif args.policy_class == "Diffusion":
         # 扩散模型策略配置
         policy_config = {
             **base_config,
-            'observation_horizon': args.observation_horizon,      # 观测历史长度
-            'action_horizon': args.action_horizon,                # 动作预测长度
-            'num_inference_timesteps': args.num_inference_timesteps,  # 推理时间步数
-            'ema_power': args.ema_power,                         # 指数移动平均功率
-
-            'action_dim': 14,
-            'states_dim': 14,
+            "observation_horizon": args.observation_horizon,  # 观测历史长度
+            "action_horizon": args.action_horizon,  # 动作预测长度
+            "num_inference_timesteps": args.num_inference_timesteps,  # 推理时间步数
+            "ema_power": args.ema_power,  # 指数移动平均功率
+            "action_dim": 14,
+            "states_dim": 14,
         }
     else:
         raise NotImplementedError
 
     # 完整的配置字典
     config = {
-        'ckpt_dir': args.ckpt_dir if sys.stdin.isatty() else Path.joinpath(ROOT, args.ckpt_dir),
-        'ckpt_name': args.ckpt_name,                 # 模型权重文件名
-        'ckpt_stats_name': args.ckpt_stats_name,     # 数据统计文件名
-        'episode_len': args.max_publish_step,        # 单回合最大步数
-        'state_dim': policy_config['states_dim'],
-        'policy_class': args.policy_class,
-        'policy_config': policy_config,
-        'temporal_agg': args.temporal_agg,           # 时序聚合
-        'camera_names': args.camera_names,
+        "ckpt_dir": (
+            args.ckpt_dir if sys.stdin.isatty() else Path.joinpath(ROOT, args.ckpt_dir)
+        ),
+        "ckpt_name": args.ckpt_name,  # 模型权重文件名
+        "ckpt_stats_name": args.ckpt_stats_name,  # 数据统计文件名
+        "episode_len": args.max_publish_step,  # 单回合最大步数
+        "state_dim": policy_config["states_dim"],
+        "policy_class": args.policy_class,
+        "policy_config": policy_config,
+        "temporal_agg": args.temporal_agg,  # 时序聚合
+        "camera_names": args.camera_names,
     }
 
     return config
@@ -313,11 +310,11 @@ def make_policy(policy_class, policy_config):
     Returns:
         策略模型对象
     """
-    if policy_class == 'ACT':
+    if policy_class == "ACT":
         policy = ACTPolicy(policy_config)
-    elif policy_class == 'CNNMLP':
+    elif policy_class == "CNNMLP":
         policy = CNNMLPPolicy(policy_config)
-    elif policy_class == 'Diffusion':
+    elif policy_class == "Diffusion":
         policy = DiffusionPolicy(policy_config)
     else:
         raise NotImplementedError
@@ -341,7 +338,7 @@ def get_image(observation, camera_names):
     curr_images = []
     for cam_name in camera_names:
         # 将图像从 (H, W, C) 转换为 (C, H, W) 格式
-        curr_image = rearrange(observation['images'][cam_name], 'h w c -> c h w')
+        curr_image = rearrange(observation["images"][cam_name], "h w c -> c h w")
         curr_images.append(curr_image)
 
     # 堆叠所有摄像头图像：[N, C, H, W]
@@ -365,7 +362,7 @@ def get_depth_image(observation, camera_names):
     """
     curr_images = []
     for cam_name in camera_names:
-        curr_images.append(observation['images_depth'][cam_name])
+        curr_images.append(observation["images_depth"][cam_name])
     curr_image = np.stack(curr_images, axis=0)
     curr_image = torch.from_numpy(curr_image / 255.0).float().cuda().unsqueeze(0)
 
@@ -429,8 +426,8 @@ def init_robot(ros_operator, use_base, connected_event, start_event):
         start_event: 开始任务事件
     """
     # 预定义的安全初始位置（关节角度）
-    init0 = [0.0, 0.948, 0.858, -0.573, 0.0, 0.0, -2.8]  # 夹爪关闭状态
-    init1 = [0.0, 0.948, 0.858, -0.573, 0.0, 0.0, 0.0]   # 夹爪打开状态
+    init0 = [0.0, 0.948, 0.858, -0.573, 0.0, 0.0, -2.8]  # 夹爪打开状态
+    init1 = [0.0, 0.948, 0.858, -0.573, 0.0, 0.0, 0.0]  # 夹爪关闭状态
 
     # 发布初始位置（关节空间姿态）- 双臂同时移动到初始位置
     ros_operator.follow_arm_publish_continuous(init0, init0)
@@ -440,7 +437,7 @@ def init_robot(ros_operator, use_base, connected_event, start_event):
     # 等待主进程确认开始任务
     start_event.wait()
 
-    # 将夹爪设置为打开状态，准备操作
+    # 将夹爪设置为关闭状态，准备操作
     ros_operator.follow_arm_publish_continuous(init1, init1)
     if use_base:
         # 如果使用底盘，启动底盘控制线程
@@ -457,7 +454,7 @@ def signal_handler(signal, frame, ros_operator):
         frame: 堆栈帧
         ros_operator: ROS操作对象
     """
-    print('Caught Ctrl+C / SIGINT signal')
+    print("Caught Ctrl+C / SIGINT signal")
 
     # 安全关闭底盘控制
     ros_operator.base_enable = False
@@ -484,7 +481,9 @@ def cleanup_shm(names):
             pass  # 共享内存不存在，忽略错误
 
 
-def ros_process(args, config, meta_queue, connected_event, start_event, shm_ready_event):
+def ros_process(
+    args, config, meta_queue, connected_event, start_event, shm_ready_event
+):
     """
     ROS进程主函数 - 观测获取和动作执行
     这是系统的核心进程，负责：
@@ -501,6 +500,7 @@ def ros_process(args, config, meta_queue, connected_event, start_event, shm_read
         start_event: 开始事件，允许任务开始执行
         shm_ready_event: 共享内存就绪事件
     """
+
     def _ros_spin(executor):
         """ROS事件循环函数"""
         executor.spin()
@@ -546,10 +546,10 @@ def ros_process(args, config, meta_queue, connected_event, start_event, shm_read
                 shapes["dtypes"][cam] = img.dtype
 
             # 记录机器人状态数据的形状
-            shapes["states"]["qpos"] = obs["qpos"].shape      # 关节位置
-            shapes["states"]["qvel"] = obs["qvel"].shape      # 关节速度
+            shapes["states"]["qpos"] = obs["qpos"].shape  # 关节位置
+            shapes["states"]["qvel"] = obs["qvel"].shape  # 关节速度
             shapes["states"]["effort"] = obs["effort"].shape  # 关节力矩
-            shapes["states"]["robot_base"] = obs["robot_base"].shape        # 底盘状态
+            shapes["states"]["robot_base"] = obs["robot_base"].shape  # 底盘状态
             shapes["states"]["base_velocity"] = obs["base_velocity"].shape  # 底盘速度
 
             # 将形状信息发送给主进程
@@ -602,23 +602,29 @@ def ros_process(args, config, meta_queue, connected_event, start_event, shm_read
             gripper_idx = [6, 13]  # 左臂夹爪索引6，右臂夹爪索引13
 
             # 提取左臂动作（前7个关节：6个自由度+夹爪）
-            left_action = action[:gripper_idx[0] + 1]
+            left_action = action[: gripper_idx[0] + 1]
             if gripper_gate != -1:
                 # 应用夹爪阈值控制
-                left_action[gripper_idx[0]] = apply_gripper_gate(left_action[gripper_idx[0]], gripper_gate)
+                left_action[gripper_idx[0]] = apply_gripper_gate(
+                    left_action[gripper_idx[0]], gripper_gate
+                )
 
             # 提取右臂动作（关节7-13：6个自由度+夹爪）
-            right_action = action[gripper_idx[0] + 1:gripper_idx[1] + 1]
+            right_action = action[gripper_idx[0] + 1 : gripper_idx[1] + 1]
             if gripper_gate != -1:
                 # 注意：这里可能是原代码的错误，应该是right_action[gripper_idx[0]]
-                right_action[gripper_idx[0]] = apply_gripper_gate(left_action[gripper_idx[0]], gripper_gate)
+                right_action[gripper_idx[0]] = apply_gripper_gate(
+                    left_action[gripper_idx[0]], gripper_gate
+                )
 
             # 发布双臂动作到机器人
             ros_operator.follow_arm_publish(left_action, right_action)
 
             # 如果启用底盘，提取并发布底盘动作
             if args.use_base:
-                action_base = action[gripper_idx[1] + 1:gripper_idx[1] + 1 + 10]  # 10维底盘动作
+                action_base = action[
+                    gripper_idx[1] + 1 : gripper_idx[1] + 1 + 10
+                ]  # 10维底盘动作
                 ros_operator.set_robot_base_target(action_base)
 
         rate.sleep()
@@ -632,95 +638,157 @@ def ros_process(args, config, meta_queue, connected_event, start_event, shm_read
 
 
 def inference_process(args, config, shm_dict, shapes, ros_proc):
-    model = make_policy(config['policy_class'], config['policy_config'])
-    ckpt_dir = config['ckpt_dir'] if sys.stdin.isatty() else Path.joinpath(ROOT, config['ckpt_dir'])
-    ckpt_path = os.path.join(ckpt_dir, config['ckpt_name'])
+    model = make_policy(config["policy_class"], config["policy_config"])
+    ckpt_dir = (
+        config["ckpt_dir"]
+        if sys.stdin.isatty()
+        else Path.joinpath(ROOT, config["ckpt_dir"])
+    )
+    ckpt_path = os.path.join(ckpt_dir, config["ckpt_name"])
     loading_status = model.load_state_dict(torch.load(ckpt_path, weights_only=True))
     print(loading_status)
 
     # 加载统计信息
-    stats_path = os.path.join(config['ckpt_dir'], config['ckpt_stats_name'])
-    with open(stats_path, 'rb') as f:
+    stats_path = os.path.join(config["ckpt_dir"], config["ckpt_stats_name"])
+    with open(stats_path, "rb") as f:
         stats = pickle.load(f)
 
-    chunk_size = config['policy_config']['chunk_size']
-    hidden_dim = config['policy_config']['hidden_dim']
-    action_dim = config['policy_config']['action_dim']
+    chunk_size = config["policy_config"]["chunk_size"]
+    hidden_dim = config["policy_config"]["hidden_dim"]
+    action_dim = config["policy_config"]["action_dim"]
 
-    use_qvel = config['policy_config']['use_qvel']
-    use_effort = config['policy_config']['use_effort']
-    use_eef_states = config['policy_config']['use_eef_states']
+    use_qvel = config["policy_config"]["use_qvel"]
+    use_effort = config["policy_config"]["use_effort"]
+    use_eef_states = config["policy_config"]["use_eef_states"]
 
-    use_robot_base = config['policy_config']['use_base']
+    use_robot_base = config["policy_config"]["use_base"]
     action = np.zeros((action_dim,))
 
-    pre_left_states_process = lambda s: (s - stats['left_states_mean']) / stats['left_states_std']
-    pre_right_states_process = lambda s: (s - stats['right_states_mean']) / stats['right_states_std']
-    pre_robot_base_process = lambda s: (s - stats['robot_base_mean']) / stats['robot_base_std']
-    pre_robot_head_process = lambda s: (s - stats['robot_head_mean']) / stats['robot_head_std']
-    pre_base_velocity_process = lambda s: (s - stats['base_velocity_mean']) / stats['base_velocity_std']
-    post_process = lambda a: a * stats['action_std'] + stats['action_mean']
+    pre_left_states_process = (
+        lambda s: (s - stats["left_states_mean"]) / stats["left_states_std"]
+    )
+    pre_right_states_process = (
+        lambda s: (s - stats["right_states_mean"]) / stats["right_states_std"]
+    )
+    pre_robot_base_process = (
+        lambda s: (s - stats["robot_base_mean"]) / stats["robot_base_std"]
+    )
+    pre_robot_head_process = (
+        lambda s: (s - stats["robot_head_mean"]) / stats["robot_head_std"]
+    )
+    pre_base_velocity_process = (
+        lambda s: (s - stats["base_velocity_mean"]) / stats["base_velocity_std"]
+    )
+    post_process = lambda a: a * stats["action_std"] + stats["action_mean"]
 
     model.cuda()
     model.eval()
 
-    max_publish_step = config['episode_len']
+    max_publish_step = config["episode_len"]
 
-    if config['temporal_agg']:
+    if config["temporal_agg"]:
         print(f"{config['state_dim']=}")
 
-        all_time_actions = np.zeros((max_publish_step, max_publish_step + chunk_size, action_dim))
+        all_time_actions = np.zeros(
+            (max_publish_step, max_publish_step + chunk_size, action_dim)
+        )
 
     timestep = 0
 
     with torch.inference_mode():
         while timestep < args.max_publish_step and ros_proc.is_alive():
-            obs_dict = {"images": {}, "qpos": None, "qvel": None, "effort": None,
-                        "robot_base": None, "base_velocity": None}
+            obs_dict = {
+                "images": {},
+                "qpos": None,
+                "qvel": None,
+                "effort": None,
+                "robot_base": None,
+                "base_velocity": None,
+            }
 
             # 从共享内存读取
             for cam in args.camera_names:
                 shm, shape, dtype = shm_dict[cam]
-                obs_dict["images"][cam] = np.ndarray(shape, dtype=dtype, buffer=shm.buf).copy()
+                obs_dict["images"][cam] = np.ndarray(
+                    shape, dtype=dtype, buffer=shm.buf
+                ).copy()
             for state_key in shapes["states"]:
                 shm, shape, dtype = shm_dict[state_key]
-                obs_dict[state_key] = np.ndarray(shape, dtype=dtype, buffer=shm.buf).copy()
+                obs_dict[state_key] = np.ndarray(
+                    shape, dtype=dtype, buffer=shm.buf
+                ).copy()
 
             gripper_idx = [6, 13]
 
-            left_qpos = obs_dict['eef'][:gripper_idx[0] + 1] if use_eef_states else obs_dict['qpos'][
-                :gripper_idx[0] + 1]
+            left_qpos = (
+                obs_dict["eef"][: gripper_idx[0] + 1]
+                if use_eef_states
+                else obs_dict["qpos"][: gripper_idx[0] + 1]
+            )
             left_states = left_qpos
 
-            right_qpos = obs_dict['eef'][gripper_idx[0] + 1:gripper_idx[1] + 1] if use_eef_states \
-                else obs_dict['qpos'][gripper_idx[0] + 1:gripper_idx[1] + 1]
+            right_qpos = (
+                obs_dict["eef"][gripper_idx[0] + 1 : gripper_idx[1] + 1]
+                if use_eef_states
+                else obs_dict["qpos"][gripper_idx[0] + 1 : gripper_idx[1] + 1]
+            )
             right_states = right_qpos
 
-            left_states = np.concatenate((left_states, obs_dict['qvel'][:gripper_idx[0] + 1]),
-                                         axis=0) if use_qvel else left_states
-            left_states = np.concatenate((left_states, obs_dict['effort'][gripper_idx[0]:gripper_idx[0] + 1]),
-                                         axis=0) if use_effort else left_states
+            left_states = (
+                np.concatenate(
+                    (left_states, obs_dict["qvel"][: gripper_idx[0] + 1]), axis=0
+                )
+                if use_qvel
+                else left_states
+            )
+            left_states = (
+                np.concatenate(
+                    (
+                        left_states,
+                        obs_dict["effort"][gripper_idx[0] : gripper_idx[0] + 1],
+                    ),
+                    axis=0,
+                )
+                if use_effort
+                else left_states
+            )
 
-            right_states = np.concatenate(
-                (right_states, obs_dict['qvel'][gripper_idx[0] + 1:gripper_idx[1] + 1]),
-                axis=0) if use_qvel else right_states  #
-            right_states = np.concatenate(
-                (right_states, obs_dict['effort'][gripper_idx[1]:gripper_idx[1] + 1]),
-                axis=0) if use_effort else right_states  #
+            right_states = (
+                np.concatenate(
+                    (
+                        right_states,
+                        obs_dict["qvel"][gripper_idx[0] + 1 : gripper_idx[1] + 1],
+                    ),
+                    axis=0,
+                )
+                if use_qvel
+                else right_states
+            )  #
+            right_states = (
+                np.concatenate(
+                    (
+                        right_states,
+                        obs_dict["effort"][gripper_idx[1] : gripper_idx[1] + 1],
+                    ),
+                    axis=0,
+                )
+                if use_effort
+                else right_states
+            )  #
 
             left_states = np.concatenate((left_states, right_states), axis=0)
             right_states = left_states
 
-            robot_base = obs_dict['robot_base'][:3]
+            robot_base = obs_dict["robot_base"][:3]
 
             robot_base = pre_robot_base_process(robot_base)
             robot_base = torch.from_numpy(robot_base).float().cuda().unsqueeze(0)
 
-            robot_head = obs_dict['robot_base'][3:6]
+            robot_head = obs_dict["robot_base"][3:6]
             robot_head = pre_robot_head_process(robot_head)
             robot_head = torch.from_numpy(robot_head).float().cuda().unsqueeze(0)
 
-            base_velocity = obs_dict['base_velocity']
+            base_velocity = obs_dict["base_velocity"]
             base_velocity = pre_base_velocity_process(base_velocity)
             base_velocity = torch.from_numpy(base_velocity).float().cuda().unsqueeze(0)
 
@@ -730,152 +798,310 @@ def inference_process(args, config, shm_dict, shapes, ros_proc):
             right_states = pre_right_states_process(right_states)
             right_states = torch.from_numpy(right_states).float().cuda().unsqueeze(0)
 
-            curr_image = get_image(obs_dict, config['camera_names'])
+            curr_image = get_image(obs_dict, config["camera_names"])
             curr_depth_image = None
 
             if args.use_depth_image:
-                curr_depth_image = get_depth_image(obs_dict, config['camera_names'])
+                curr_depth_image = get_depth_image(obs_dict, config["camera_names"])
 
-            if config['policy_class'] == "ACT":
-                all_actions = model(curr_image, curr_depth_image, left_states, right_states,
-                                    robot_base=robot_base, robot_head=robot_head,
-                                    base_velocity=base_velocity)
+            if config["policy_class"] == "ACT":
+                # ===== 步骤1: 模型推理 =====
+                # 将当前观测数据输入ACT模型，获取未来chunk_size步的动作预测
+                # all_actions形状: (1, chunk_size, action_dim)
+                # 例如: (1, 30, 14) 表示预测未来30步的14维动作
+                all_actions = model(
+                    curr_image,  # 当前图像观测 [1, C*N, H, W]
+                    curr_depth_image,  # 当前深度图像 [1, C*N, H, W] (可选)
+                    left_states,  # 左臂状态 [1, states_dim]
+                    right_states,  # 右臂状态 [1, states_dim]
+                    robot_base=robot_base,  # 机器人底盘位置 [1, 3]
+                    robot_head=robot_head,  # 机器人头部姿态 [1, 3]
+                    base_velocity=base_velocity,  # 底盘速度 [1, 4]
+                )
 
-                if config['temporal_agg']:
-                    all_time_actions[[timestep], timestep:timestep + chunk_size] = all_actions.cpu().numpy()
+                # ===== 步骤2: 动作处理分支 =====
+                if config["temporal_agg"]:
+                    # ===== 分支A: 时序聚合模式 =====
+                    # 用于提高动作的平滑性和稳定性
 
-                    actions_for_curr_step = all_time_actions[:, timestep]  # (10000,1,14) => (10000, 14)
+                    # 2.1 存储历史动作预测
+                    # 将当前时间步的动作预测存储到全局动作矩阵中
+                    # all_time_actions形状: (max_publish_step, max_publish_step + chunk_size, action_dim)
+                    # 例如: (10000, 10030, 14) 用于存储所有时间步的动作预测
+                    all_time_actions[[timestep], timestep : timestep + chunk_size] = (
+                        all_actions.cpu().numpy()  # 转换为numpy数组并存储
+                    )
+
+                    # 2.2 提取当前时间步的所有历史预测
+                    # 从所有历史预测中提取当前时间步的动作
+                    # 形状: (timestep+1, action_dim) - 包含从开始到当前的所有预测
+                    actions_for_curr_step = all_time_actions[:, timestep]
+
+                    # 2.3 过滤有效预测
+                    # 只保留非零的动作预测（排除未初始化的部分）
+                    # actions_populated: 布尔数组，标记哪些时间步有有效预测
                     actions_populated = np.all(actions_for_curr_step != 0, axis=1)
                     actions_for_curr_step = actions_for_curr_step[actions_populated]
 
-                    k = 0.01
+                    # 2.4 计算指数衰减权重
+                    # 使用指数衰减函数给不同时间步的预测分配权重
+                    # 越近期的预测权重越大，越早期的预测权重越小
+                    k = 0.01  # 衰减系数，控制权重衰减速度
                     exp_weights = np.exp(-k * np.arange(len(actions_for_curr_step)))
-                    exp_weights = exp_weights / exp_weights.sum()
-                    exp_weights = exp_weights[:, np.newaxis]
-                    raw_action = (actions_for_curr_step * exp_weights).sum(axis=0, keepdims=True)
+                    exp_weights = exp_weights / exp_weights.sum()  # 归一化权重
+                    exp_weights = exp_weights[:, np.newaxis]  # 添加维度用于广播
+
+                    # 2.5 加权平均计算最终动作
+                    # 将历史预测按权重进行加权平均，得到平滑的最终动作
+                    # 形状: (1, action_dim)
+                    raw_action = (actions_for_curr_step * exp_weights).sum(
+                        axis=0, keepdims=True
+                    )
                 else:
+                    # ===== 分支B: 直接模式 =====
+                    # 不使用时序聚合，直接使用当前预测的动作
+
                     if args.pos_lookahead_step != 0:
-                        raw_action = all_actions[:, timestep % args.model.inference.pos_lookahead_step]
+                        # 2.1 位置前瞻模式
+                        # 使用特定的前瞻步数来选择动作
+                        # 用于处理位置相关的特殊控制需求
+                        raw_action = all_actions[
+                            :, timestep % args.model.inference.pos_lookahead_step
+                        ]
                     else:
+                        # 2.2 标准模式
+                        # 使用当前时间步在chunk中的位置来选择动作
+                        # timestep % chunk_size 确保在chunk范围内循环
                         raw_action = all_actions[:, timestep % chunk_size]
+
             else:
+                # 其他策略类型暂未实现
                 raise NotImplementedError
 
+            # ===== 步骤3: 动作后处理 =====
+            # 将模型输出的原始动作转换为实际可执行的动作
+            # post_process函数会进行反归一化等操作
+            # raw_action[0] 去除batch维度，得到 (action_dim,) 的动作向量
             action = post_process(raw_action[0])
 
+            # ===== 步骤4: 动作执行 =====
+            # 将处理后的动作写入共享内存，供ROS进程读取并执行
             robot_action(action, shm_dict)
 
+            # ===== 步骤5: 时间步更新 =====
             timestep += 1
 
+        # ===== 步骤6: 底盘动作清理 =====
+        # 如果使用移动底盘，在推理结束时将某些底盘动作设为0
+        # 这可能是为了安全停止或重置某些底盘功能
         if args.use_base:
-            action[16] = 0
-            action[17] = 0
-            action[19] = 0
+            action[16] = 0  # 底盘动作索引16设为0
+            action[17] = 0  # 底盘动作索引17设为0
+            action[19] = 0  # 底盘动作索引19设为0
 
+        # ===== 步骤7: 最终动作执行 =====
+        # 执行清理后的最终动作
         robot_action(action, shm_dict)
 
 
 def parse_args(known=False):
-    parser = argparse.ArgumentParser() # 解析命令行参数
-    parser.add_argument('--max_publish_step', type=int, default=10000, help='max publish step') # 单回合最大步数
+    parser = argparse.ArgumentParser()  # 解析命令行参数
+    parser.add_argument(
+        "--max_publish_step", type=int, default=10000, help="max publish step"
+    )  # 单回合最大步数
 
     # 数据集和检查点设置
-    parser.add_argument('--ckpt_dir', type=str, default=Path.joinpath(ROOT, 'weights'),
-                        help='ckpt dir')
-    parser.add_argument('--ckpt_name', type=str, default='policy_best.ckpt',
-                        help='ckpt name')
-    parser.add_argument('--pretrain_ckpt', type=str, default='',
-                        help='pretrain ckpt')
-    parser.add_argument('--ckpt_stats_name', type=str, default='dataset_stats.pkl',
-                        help='ckpt stats name')
+    parser.add_argument(
+        "--ckpt_dir", type=str, default=Path.joinpath(ROOT, "weights"), help="ckpt dir"
+    )
+    parser.add_argument(
+        "--ckpt_name", type=str, default="policy_best.ckpt", help="ckpt name"
+    )
+    parser.add_argument("--pretrain_ckpt", type=str, default="", help="pretrain ckpt")
+    parser.add_argument(
+        "--ckpt_stats_name",
+        type=str,
+        default="dataset_stats.pkl",
+        help="ckpt stats name",
+    )
 
     # 配置文件
-    parser.add_argument('--data', type=str,
-                        default=Path.joinpath(ROOT, 'data/config.yaml'),
-                        help='config file')
+    parser.add_argument(
+        "--data",
+        type=str,
+        default=Path.joinpath(ROOT, "data/config.yaml"),
+        help="config file",
+    )
 
     # 推理设置
-    parser.add_argument('--seed', type=int, default=0, help='seed')
-    parser.add_argument('--lr', type=float, default=1e-5, help='learning rate')
-    parser.add_argument('--lr_backbone', type=float, default=1e-5, help='learning rate for backbone')
-    parser.add_argument('--weight_decay', type=float, default=1e-4, help='weight decay rate')
-    parser.add_argument('--loss_function', type=str, choices=['l1', 'l2', 'l1+l2'],
-                        default='l1', help='loss function')
-    parser.add_argument('--pos_lookahead_step', type=int, default=0, help='position lookahead step')
+    parser.add_argument("--seed", type=int, default=0, help="seed")
+    parser.add_argument("--lr", type=float, default=1e-5, help="learning rate")
+    parser.add_argument(
+        "--lr_backbone", type=float, default=1e-5, help="learning rate for backbone"
+    )
+    parser.add_argument(
+        "--weight_decay", type=float, default=1e-4, help="weight decay rate"
+    )
+    parser.add_argument(
+        "--loss_function",
+        type=str,
+        choices=["l1", "l2", "l1+l2"],
+        default="l1",
+        help="loss function",
+    )
+    parser.add_argument(
+        "--pos_lookahead_step", type=int, default=0, help="position lookahead step"
+    )
 
     # 模型结构设置
-    parser.add_argument('--policy_class', type=str, choices=['CNNMLP', 'ACT', 'Diffusion'], default='ACT',
-                        help='policy class selection')
-    parser.add_argument('--backbone', type=str, default='resnet18', help='backbone model architecture')
-    parser.add_argument('--chunk_size', type=int, default=30, help='chunk size for input data')
-    parser.add_argument('--hidden_dim', type=int, default=512, help='hidden layer dimension size')
+    parser.add_argument(
+        "--policy_class",
+        type=str,
+        choices=["CNNMLP", "ACT", "Diffusion"],
+        default="ACT",
+        help="policy class selection",
+    )
+    parser.add_argument(
+        "--backbone", type=str, default="resnet18", help="backbone model architecture"
+    )
+    parser.add_argument(
+        "--chunk_size", type=int, default=30, help="chunk size for input data"
+    )
+    parser.add_argument(
+        "--hidden_dim", type=int, default=512, help="hidden layer dimension size"
+    )
 
     # 摄像头和位置嵌入设置
-    parser.add_argument('--camera_names', nargs='+', type=str,
-                        choices=['head', 'left_wrist', 'right_wrist', ],
-                        default=['head', 'left_wrist', 'right_wrist'],
-                        help='camera names to use')
-    parser.add_argument('--position_embedding', type=str, choices=('sine', 'learned'), default='sine',
-                        help='type of positional embedding to use')
-    parser.add_argument('--masks', action='store_true', help='train segmentation head if provided')
-    parser.add_argument('--dilation', action='store_true',
-                        help='replace stride with dilation in the last convolutional block (DC5)')
+    parser.add_argument(
+        "--camera_names",
+        nargs="+",
+        type=str,
+        choices=[
+            "head",
+            "left_wrist",
+            "right_wrist",
+        ],
+        default=["head", "left_wrist", "right_wrist"],
+        help="camera names to use",
+    )
+    parser.add_argument(
+        "--position_embedding",
+        type=str,
+        choices=("sine", "learned"),
+        default="sine",
+        help="type of positional embedding to use",
+    )
+    parser.add_argument(
+        "--masks", action="store_true", help="train segmentation head if provided"
+    )
+    parser.add_argument(
+        "--dilation",
+        action="store_true",
+        help="replace stride with dilation in the last convolutional block (DC5)",
+    )
 
     # 机器人设置
-    parser.add_argument('--use_base', action='store_true', help='use robot base')
-    parser.add_argument('--record', choices=['Distance', 'Speed'], default='Distance',
-                        help='record data')
-    parser.add_argument('--frame_rate', type=int, default=60, help='frame rate')
+    parser.add_argument("--use_base", action="store_true", help="use robot base")
+    parser.add_argument(
+        "--record",
+        choices=["Distance", "Speed"],
+        default="Distance",
+        help="record data",
+    )
+    parser.add_argument("--frame_rate", type=int, default=60, help="frame rate")
 
     # ACT模型专用设置
-    parser.add_argument('--enc_layers', type=int, default=4, help='number of encoder layers')
-    parser.add_argument('--dec_layers', type=int, default=7, help='number of decoder layers')
-    parser.add_argument('--nheads', type=int, default=8, help='number of attention heads')
-    parser.add_argument('--dropout', type=float, default=0.1, help='dropout rate in transformer layers')
-    parser.add_argument('--pre_norm', action='store_true', help='use pre-normalization in transformer')
-    parser.add_argument('--states_dim', type=int, default=14, help='state dimension size')
-    parser.add_argument('--kl_weight', type=int, default=10, help='KL divergence weight')
-    parser.add_argument('--dim_feedforward', type=int, default=3200, help='feedforward network dimension')
-    parser.add_argument('--temporal_agg', type=bool, default=True, help='use temporal aggregation')
+    parser.add_argument(
+        "--enc_layers", type=int, default=4, help="number of encoder layers"
+    )
+    parser.add_argument(
+        "--dec_layers", type=int, default=7, help="number of decoder layers"
+    )
+    parser.add_argument(
+        "--nheads", type=int, default=8, help="number of attention heads"
+    )
+    parser.add_argument(
+        "--dropout", type=float, default=0.1, help="dropout rate in transformer layers"
+    )
+    parser.add_argument(
+        "--pre_norm", action="store_true", help="use pre-normalization in transformer"
+    )
+    parser.add_argument(
+        "--states_dim", type=int, default=14, help="state dimension size"
+    )
+    parser.add_argument(
+        "--kl_weight", type=int, default=10, help="KL divergence weight"
+    )
+    parser.add_argument(
+        "--dim_feedforward",
+        type=int,
+        default=3200,
+        help="feedforward network dimension",
+    )
+    parser.add_argument(
+        "--temporal_agg", type=bool, default=True, help="use temporal aggregation"
+    )
 
     # Diffusion模型专用设置
-    parser.add_argument('--observation_horizon', type=int, default=1, help='observation horizon length')
-    parser.add_argument('--action_horizon', type=int, default=8, help='action horizon length')
-    parser.add_argument('--num_inference_timesteps', type=int, default=10,
-                        help='number of inference timesteps')
-    parser.add_argument('--ema_power', type=int, default=0.75, help='EMA power for diffusion process')
+    parser.add_argument(
+        "--observation_horizon", type=int, default=1, help="observation horizon length"
+    )
+    parser.add_argument(
+        "--action_horizon", type=int, default=8, help="action horizon length"
+    )
+    parser.add_argument(
+        "--num_inference_timesteps",
+        type=int,
+        default=10,
+        help="number of inference timesteps",
+    )
+    parser.add_argument(
+        "--ema_power", type=int, default=0.75, help="EMA power for diffusion process"
+    )
 
     # 图像设置
-    parser.add_argument('--use_depth_image', action='store_true', help='use depth image')
+    parser.add_argument(
+        "--use_depth_image", action="store_true", help="use depth image"
+    )
 
     # 状态和动作设置
-    parser.add_argument('--use_qvel', action='store_true', help='include qvel in state information')
-    parser.add_argument('--use_effort', action='store_true', help='include effort data in state')
-    parser.add_argument('--use_eef_states', action='store_true', help='use eef data in state')
+    parser.add_argument(
+        "--use_qvel", action="store_true", help="include qvel in state information"
+    )
+    parser.add_argument(
+        "--use_effort", action="store_true", help="include effort data in state"
+    )
+    parser.add_argument(
+        "--use_eef_states", action="store_true", help="use eef data in state"
+    )
 
-    parser.add_argument('--gripper_gate', type=float, default=-1, help='gripper gate threshold')
+    parser.add_argument(
+        "--gripper_gate", type=float, default=-1, help="gripper gate threshold"
+    )
 
     return parser.parse_known_args()[0] if known else parser.parse_args()
 
 
 def main(args):
-    '''
+    """
     1、多线程通信机制：队列用于数据交换，事件用于同步
     2、ROS进程+推理进程：ROS进程负责数据通信，推理进程负责模型预测
     3、共享内存机制：实现进程间高效数据传递
-    '''
-    meta_queue = mp.Queue() # 用于在主进程和推理进程之间传递meta信息
+    """
+    meta_queue = mp.Queue()  # 用于在主进程和推理进程之间传递meta信息
 
-    connected_event = mp.Event() # 用于在主进程和推理进程之间传递连接事件
-    start_event = mp.Event() # 用于在主进程和推理进程之间传递启动事件
-    shm_ready_event = mp.Event() # 用于在主进程和推理进程之间传递共享内存就绪事件
+    connected_event = mp.Event()  # 用于在主进程和推理进程之间传递连接事件
+    start_event = mp.Event()  # 用于在主进程和推理进程之间传递启动事件
+    shm_ready_event = mp.Event()  # 用于在主进程和推理进程之间传递共享内存就绪事件
 
     # 获取模型config
     config = get_model_config(args)
 
     # *启动ROS进程
-    ros_proc = mp.Process(target=ros_process, args=(args, config, meta_queue,
-                                                    connected_event, start_event, shm_ready_event))
+    ros_proc = mp.Process(
+        target=ros_process,
+        args=(args, config, meta_queue, connected_event, start_event, shm_ready_event),
+    )
     ros_proc.start()
 
     connected_event.wait()
@@ -906,6 +1132,6 @@ def main(args):
         ros_proc.join()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     args = parse_args()
     main(args)

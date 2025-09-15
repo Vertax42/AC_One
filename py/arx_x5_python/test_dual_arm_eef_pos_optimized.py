@@ -707,7 +707,7 @@ class OptimizedDualArmController:
                 print("检测到回零请求或Ctrl+C，执行回零...")
                 self.handle_go_home_request()
 
-            time.sleep(0.2)  # 位置间暂停（降低）
+            time.sleep(0.1)  # 位置间暂停（降低）
 
     def _get_duration_for_position(
         self,
@@ -823,7 +823,7 @@ class OptimizedDualArmController:
                     self.close_grippers()
                 time.sleep(0.2)
 
-            time.sleep(0.1)  # 圆形运动暂停（降低）
+            time.sleep(0.05)  # 圆形运动暂停（降低）
 
     def _euler_to_quaternion(self, roll: float, pitch: float, yaw: float) -> np.ndarray:
         """将欧拉角转换为四元数"""
@@ -938,7 +938,7 @@ class OptimizedDualArmController:
                 print(f"{axis_name}旋转测试在角度 {angle_deg}度 失败")
                 break
 
-            time.sleep(0.3)  # 单轴旋转暂停（降低）
+            time.sleep(0.1)  # 单轴旋转暂停（降低）
 
     def test_wave_motion(
         self,

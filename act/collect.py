@@ -22,12 +22,29 @@ import cv2
 import yaml
 import threading
 import pyttsx3
+import signal
 
 import numpy as np
 
 from copy import deepcopy
 
 from utils.ros_operator import Rate, RosOperator
+
+# 全局退出标志
+exit_flag = False
+
+
+# 信号处理函数
+def signal_handler(signum, frame):
+    global exit_flag
+    print("\n检测到Ctrl+C信号，正在安全退出...")
+    exit_flag = True
+    # 不要在这里直接退出，让主程序正常清理
+
+
+# 注册信号处理
+signal.signal(signal.SIGINT, signal_handler)
+
 from utils.setup_loader import setup_loader
 
 np.set_printoptions(linewidth=200)
@@ -82,7 +99,7 @@ def collect_detect(args, start_episode, voice_engine, ros_operator):
     else:
         init_done = False
 
-        while not init_done and rclpy.ok():
+        while not init_done and rclpy.ok() and not exit_flag:
             obs_dict = ros_operator.get_observation()
             if obs_dict == None:
                 print("synchronization frame")
@@ -113,6 +130,10 @@ def collect_detect(args, start_episode, voice_engine, ros_operator):
             if init_done:
                 voice_process(voice_engine, f"{start_episode % 100}")
             rate.sleep()
+
+        # 如果是因为Ctrl+C退出，直接返回False
+        if exit_flag:
+            return False
 
         voice_process(voice_engine, "go")
 
@@ -387,9 +408,11 @@ def main(args):
         current_episode = max_episode + 1
 
     episode_num = 0
-    while episode_num < num_episodes and rclpy.ok():
+    while episode_num < num_episodes and rclpy.ok() and not exit_flag:
         print(f"Episode {episode_num}")
-        collect_detect(args, current_episode, voice_engine, ros_operator)
+        if not collect_detect(args, current_episode, voice_engine, ros_operator):
+            print("数据采集被用户中断")
+            break
 
         print(f"Start to record episode {current_episode}")
         timesteps, actions, actions_eef, action_bases, action_velocities = (
