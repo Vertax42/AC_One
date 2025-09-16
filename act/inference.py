@@ -301,20 +301,35 @@ def ros_process(
     args, config, meta_queue, connected_event, start_event, shm_ready_event
 ):
     def _ros_spin(executor):
-        executor.spin()
+        try:
+            executor.spin()
+        except Exception as e:
+            print(f"ROS spin error: {e}")
 
     setup_loader(ROOT)
 
-    rclpy.init()
+    try:
+        rclpy.init()
+    except Exception as e:
+        print(f"ROS2 init error: {e}")
+        return
 
-    data = load_yaml(args.data)
-    ros_operator = RosOperator(args, data, in_collect=False)
+    try:
+        data = load_yaml(args.data)
+        ros_operator = RosOperator(args, data, in_collect=False)
 
-    executor = MultiThreadedExecutor()
-    executor.add_node(ros_operator)
+        executor = MultiThreadedExecutor()
+        executor.add_node(ros_operator)
 
-    spin_thread = threading.Thread(target=_ros_spin, args=(executor,), daemon=True)
-    spin_thread.start()
+        spin_thread = threading.Thread(target=_ros_spin, args=(executor,), daemon=True)
+        spin_thread.start()
+    except Exception as e:
+        print(f"ROS operator creation error: {e}")
+        try:
+            rclpy.shutdown()
+        except Exception:
+            pass
+        return
 
     if args.use_base:
         signal.signal(signal.SIGINT, partial(signal_handler, ros_operator=ros_operator))
@@ -396,28 +411,80 @@ def ros_process(
 
         rate.sleep()
 
-    executor.shutdown()
-    rclpy.shutdown()
+    try:
+        executor.shutdown()
+    except Exception as e:
+        print(f"Executor shutdown error: {e}")
+
+    try:
+        rclpy.shutdown()
+    except Exception as e:
+        print(f"ROS2 shutdown error: {e}")
+
     for shm, _, _ in shm_dict.values():
-        shm.close()
-        shm.unlink()
+        try:
+            shm.close()
+            shm.unlink()
+        except Exception as e:
+            print(f"Shared memory cleanup error: {e}")
 
 
 def inference_process(args, config, shm_dict, shapes, ros_proc):
-    model = make_policy(config["policy_class"], config["policy_config"])
+    # 检查CUDA环境变量
+    cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+    if not cuda_visible_devices:
+        print("⚠️  警告: CUDA_VISIBLE_DEVICES 未设置，尝试设置默认值")
+        os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+
+    # 检查CUDA可用性
+    if not torch.cuda.is_available():
+        print("❌ CUDA不可用，无法进行GPU推理")
+        print("   请检查:")
+        print("   1. NVIDIA驱动是否正确安装")
+        print("   2. CUDA是否正确安装")
+        print("   3. PyTorch是否支持CUDA")
+        return
+
+    # 显示CUDA设备信息
+    print(f"🔧 CUDA设备信息:")
+    print(
+        f"   CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES', 'Not set')}"
+    )
+    print(f"   可用GPU数量: {torch.cuda.device_count()}")
+    if torch.cuda.device_count() > 0:
+        print(f"   当前GPU: {torch.cuda.current_device()}")
+        print(f"   GPU名称: {torch.cuda.get_device_name(0)}")
+    else:
+        print("   ⚠️  没有可用的GPU设备")
+
+    try:
+        model = make_policy(config["policy_class"], config["policy_config"])
+    except Exception as e:
+        print(f"❌ 模型创建失败: {e}")
+        return
+
     ckpt_dir = (
         config["ckpt_dir"]
         if sys.stdin.isatty()
         else Path.joinpath(ROOT, config["ckpt_dir"])
     )
     ckpt_path = os.path.join(ckpt_dir, config["ckpt_name"])
-    loading_status = model.load_state_dict(torch.load(ckpt_path, weights_only=True))
-    print(loading_status)
+
+    try:
+        loading_status = model.load_state_dict(torch.load(ckpt_path, weights_only=True))
+        print(loading_status)
+    except Exception as e:
+        print(f"❌ 模型权重加载失败: {e}")
+        return
 
     # 加载统计信息
-    stats_path = os.path.join(config["ckpt_dir"], config["ckpt_stats_name"])
-    with open(stats_path, "rb") as f:
-        stats = pickle.load(f)
+    try:
+        stats_path = os.path.join(config["ckpt_dir"], config["ckpt_stats_name"])
+        with open(stats_path, "rb") as f:
+            stats = pickle.load(f)
+    except Exception as e:
+        print(f"❌ 统计文件加载失败: {e}")
+        return
 
     chunk_size = config["policy_config"]["chunk_size"]
     hidden_dim = config["policy_config"]["hidden_dim"]
@@ -445,194 +512,202 @@ def inference_process(args, config, shm_dict, shapes, ros_proc):
     pre_base_velocity_process = (
         lambda s: (s - stats["base_velocity_mean"]) / stats["base_velocity_std"]
     )
-    post_process = lambda a: a * stats["action_std"] + stats["action_mean"]
 
-    model.cuda()
-    model.eval()
+    def post_process(a):
+        return a * stats["action_std"] + stats["action_mean"]
+
+    try:
+        # 明确指定使用GPU 0
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        model = model.to(device)
+        model.eval()
+        print(f"✅ 模型已加载到设备: {device}")
+    except Exception as e:
+        print(f"❌ 模型GPU加载失败: {e}")
+        return
 
     max_publish_step = config["episode_len"]
 
-    while ros_proc.is_alive():
-        if config["temporal_agg"]:
-            print(f"{config['state_dim']=}")
+    if config["temporal_agg"]:
+        print(f"{config['state_dim']=}")
+        print(
+            f"📊 temporal_agg模式内存需求: {max_publish_step * (max_publish_step + chunk_size) * action_dim * 8 / (1024**3):.2f} GB"
+        )
 
-            all_time_actions = np.zeros(
-                (max_publish_step, max_publish_step + chunk_size, action_dim)
+        all_time_actions = np.zeros(
+            (max_publish_step, max_publish_step + chunk_size, action_dim)
+        )
+        print("✅ 动作历史数组已创建")
+
+    timestep = 0
+
+    with torch.inference_mode():
+        while timestep < args.max_publish_step and ros_proc.is_alive():
+            obs_dict = {
+                "images": {},
+                "qpos": None,
+                "qvel": None,
+                "effort": None,
+                "robot_base": None,
+                "base_velocity": None,
+            }
+
+            # 从共享内存读取
+            for cam in args.camera_names:
+                shm, shape, dtype = shm_dict[cam]
+                obs_dict["images"][cam] = np.ndarray(
+                    shape, dtype=dtype, buffer=shm.buf
+                ).copy()
+            for state_key in shapes["states"]:
+                shm, shape, dtype = shm_dict[state_key]
+                obs_dict[state_key] = np.ndarray(
+                    shape, dtype=dtype, buffer=shm.buf
+                ).copy()
+
+            gripper_idx = [6, 13]
+
+            left_qpos = (
+                obs_dict["eef"][: gripper_idx[0] + 1]
+                if use_eef_states
+                else obs_dict["qpos"][: gripper_idx[0] + 1]
+            )
+            left_states = left_qpos
+
+            right_qpos = (
+                obs_dict["eef"][gripper_idx[0] + 1 : gripper_idx[1] + 1]
+                if use_eef_states
+                else obs_dict["qpos"][gripper_idx[0] + 1 : gripper_idx[1] + 1]
+            )
+            right_states = right_qpos
+
+            left_states = (
+                np.concatenate(
+                    (left_states, obs_dict["qvel"][: gripper_idx[0] + 1]), axis=0
+                )
+                if use_qvel
+                else left_states
+            )
+            left_states = (
+                np.concatenate(
+                    (
+                        left_states,
+                        obs_dict["effort"][gripper_idx[0] : gripper_idx[0] + 1],
+                    ),
+                    axis=0,
+                )
+                if use_effort
+                else left_states
             )
 
-        timestep = 0
-
-        with torch.inference_mode():
-            while timestep < args.max_publish_step and ros_proc.is_alive():
-                obs_dict = {
-                    "images": {},
-                    "qpos": None,
-                    "qvel": None,
-                    "effort": None,
-                    "robot_base": None,
-                    "base_velocity": None,
-                }
-
-                # 从共享内存读取
-                for cam in args.camera_names:
-                    shm, shape, dtype = shm_dict[cam]
-                    obs_dict["images"][cam] = np.ndarray(
-                        shape, dtype=dtype, buffer=shm.buf
-                    ).copy()
-                for state_key in shapes["states"]:
-                    shm, shape, dtype = shm_dict[state_key]
-                    obs_dict[state_key] = np.ndarray(
-                        shape, dtype=dtype, buffer=shm.buf
-                    ).copy()
-
-                gripper_idx = [6, 13]
-
-                left_qpos = (
-                    obs_dict["eef"][: gripper_idx[0] + 1]
-                    if use_eef_states
-                    else obs_dict["qpos"][: gripper_idx[0] + 1]
-                )
-                left_states = left_qpos
-
-                right_qpos = (
-                    obs_dict["eef"][gripper_idx[0] + 1 : gripper_idx[1] + 1]
-                    if use_eef_states
-                    else obs_dict["qpos"][gripper_idx[0] + 1 : gripper_idx[1] + 1]
-                )
-                right_states = right_qpos
-
-                left_states = (
-                    np.concatenate(
-                        (left_states, obs_dict["qvel"][: gripper_idx[0] + 1]), axis=0
-                    )
-                    if use_qvel
-                    else left_states
-                )
-                left_states = (
-                    np.concatenate(
-                        (
-                            left_states,
-                            obs_dict["effort"][gripper_idx[0] : gripper_idx[0] + 1],
-                        ),
-                        axis=0,
-                    )
-                    if use_effort
-                    else left_states
-                )
-
-                right_states = (
-                    np.concatenate(
-                        (
-                            right_states,
-                            obs_dict["qvel"][gripper_idx[0] + 1 : gripper_idx[1] + 1],
-                        ),
-                        axis=0,
-                    )
-                    if use_qvel
-                    else right_states
-                )  #
-                right_states = (
-                    np.concatenate(
-                        (
-                            right_states,
-                            obs_dict["effort"][gripper_idx[1] : gripper_idx[1] + 1],
-                        ),
-                        axis=0,
-                    )
-                    if use_effort
-                    else right_states
-                )  #
-
-                left_states = np.concatenate((left_states, right_states), axis=0)
-                right_states = left_states
-
-                robot_base = obs_dict["robot_base"][:3]
-
-                robot_base = pre_robot_base_process(robot_base)
-                robot_base = torch.from_numpy(robot_base).float().cuda().unsqueeze(0)
-
-                robot_head = obs_dict["robot_base"][3:6]
-                robot_head = pre_robot_head_process(robot_head)
-                robot_head = torch.from_numpy(robot_head).float().cuda().unsqueeze(0)
-
-                base_velocity = obs_dict["base_velocity"]
-                base_velocity = pre_base_velocity_process(base_velocity)
-                base_velocity = (
-                    torch.from_numpy(base_velocity).float().cuda().unsqueeze(0)
-                )
-
-                left_states = pre_left_states_process(left_states)
-                left_states = torch.from_numpy(left_states).float().cuda().unsqueeze(0)
-
-                right_states = pre_right_states_process(right_states)
-                right_states = (
-                    torch.from_numpy(right_states).float().cuda().unsqueeze(0)
-                )
-
-                curr_image = get_image(obs_dict, config["camera_names"])
-                curr_depth_image = None
-
-                if args.use_depth_image:
-                    curr_depth_image = get_depth_image(obs_dict, config["camera_names"])
-
-                if config["policy_class"] == "ACT":
-                    all_actions = model(
-                        curr_image,
-                        curr_depth_image,
-                        left_states,
+            right_states = (
+                np.concatenate(
+                    (
                         right_states,
-                        robot_base=robot_base,
-                        robot_head=robot_head,
-                        base_velocity=base_velocity,
+                        obs_dict["qvel"][gripper_idx[0] + 1 : gripper_idx[1] + 1],
+                    ),
+                    axis=0,
+                )
+                if use_qvel
+                else right_states
+            )  #
+            right_states = (
+                np.concatenate(
+                    (
+                        right_states,
+                        obs_dict["effort"][gripper_idx[1] : gripper_idx[1] + 1],
+                    ),
+                    axis=0,
+                )
+                if use_effort
+                else right_states
+            )  #
+
+            left_states = np.concatenate((left_states, right_states), axis=0)
+            right_states = left_states
+
+            robot_base = obs_dict["robot_base"][:3]
+
+            robot_base = pre_robot_base_process(robot_base)
+            robot_base = torch.from_numpy(robot_base).float().cuda().unsqueeze(0)
+
+            robot_head = obs_dict["robot_base"][3:6]
+            robot_head = pre_robot_head_process(robot_head)
+            robot_head = torch.from_numpy(robot_head).float().cuda().unsqueeze(0)
+
+            base_velocity = obs_dict["base_velocity"]
+            base_velocity = pre_base_velocity_process(base_velocity)
+            base_velocity = torch.from_numpy(base_velocity).float().cuda().unsqueeze(0)
+
+            left_states = pre_left_states_process(left_states)
+            left_states = torch.from_numpy(left_states).float().cuda().unsqueeze(0)
+
+            right_states = pre_right_states_process(right_states)
+            right_states = torch.from_numpy(right_states).float().cuda().unsqueeze(0)
+
+            curr_image = get_image(obs_dict, config["camera_names"])
+            curr_depth_image = None
+
+            if args.use_depth_image:
+                curr_depth_image = get_depth_image(obs_dict, config["camera_names"])
+
+            if config["policy_class"] == "ACT":
+                all_actions = model(
+                    curr_image,
+                    curr_depth_image,
+                    left_states,
+                    right_states,
+                    robot_base=robot_base,
+                    robot_head=robot_head,
+                    base_velocity=base_velocity,
+                )
+
+                if config["temporal_agg"]:
+                    all_time_actions[[timestep], timestep : timestep + chunk_size] = (
+                        all_actions.cpu().numpy()
                     )
 
-                    if config["temporal_agg"]:
-                        all_time_actions[
-                            [timestep], timestep : timestep + chunk_size
-                        ] = all_actions.cpu().numpy()
+                    actions_for_curr_step = all_time_actions[
+                        :, timestep
+                    ]  # (10000,1,14) => (10000, 14)
+                    actions_populated = np.all(actions_for_curr_step != 0, axis=1)
+                    actions_for_curr_step = actions_for_curr_step[actions_populated]
 
-                        actions_for_curr_step = all_time_actions[
-                            :, timestep
-                        ]  # (10000,1,14) => (10000, 14)
-                        actions_populated = np.all(actions_for_curr_step != 0, axis=1)
-                        actions_for_curr_step = actions_for_curr_step[actions_populated]
-
-                        k = 0.01
-                        exp_weights = np.exp(-k * np.arange(len(actions_for_curr_step)))
-                        exp_weights = exp_weights / exp_weights.sum()
-                        exp_weights = exp_weights[:, np.newaxis]
-                        raw_action = (actions_for_curr_step * exp_weights).sum(
-                            axis=0, keepdims=True
-                        )
-                    else:
-                        if args.pos_lookahead_step != 0:
-                            raw_action = all_actions[
-                                :, timestep % args.model.inference.pos_lookahead_step
-                            ]
-                        else:
-                            raw_action = all_actions[:, timestep % chunk_size]
+                    k = 0.01
+                    exp_weights = np.exp(-k * np.arange(len(actions_for_curr_step)))
+                    exp_weights = exp_weights / exp_weights.sum()
+                    exp_weights = exp_weights[:, np.newaxis]
+                    raw_action = (actions_for_curr_step * exp_weights).sum(
+                        axis=0, keepdims=True
+                    )
                 else:
-                    raise NotImplementedError
+                    if args.pos_lookahead_step != 0:
+                        raw_action = all_actions[
+                            :, timestep % args.model.inference.pos_lookahead_step
+                        ]
+                    else:
+                        raw_action = all_actions[:, timestep % chunk_size]
+            else:
+                raise NotImplementedError
 
-                action = post_process(raw_action[0])
-
-                robot_action(action, shm_dict)
-
-                timestep += 1
-
-            if args.use_base:
-                action[16] = 0
-                action[17] = 0
-                action[19] = 0
+            action = post_process(raw_action[0])
 
             robot_action(action, shm_dict)
+
+            timestep += 1
+
+        if args.use_base:
+            action[16] = 0
+            action[17] = 0
+            action[19] = 0
+
+        robot_action(action, shm_dict)
 
 
 def parse_args(known=False):
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        "--max_publish_step", type=int, default=10000, help="max publish step"
+        "--max_publish_step", type=int, default=3600, help="max publish step"
     )
 
     # 数据集和检查点设置
@@ -843,13 +918,30 @@ def main(args):
     try:
         inference_process(args, config, shm_dict, shapes, ros_proc)
     except KeyboardInterrupt:
-        pass
+        print("🛑 用户中断推理")
+    except Exception as e:
+        print(f"❌ 推理过程错误: {e}")
     finally:
+        print("🧹 开始清理资源...")
+        # 清理共享内存
         for shm, _, _ in shm_dict.values():
-            shm.close()
-            shm.unlink()
-        ros_proc.terminate()
-        ros_proc.join()
+            try:
+                shm.close()
+                shm.unlink()
+            except Exception as e:
+                print(f"共享内存清理错误: {e}")
+
+        # 终止ROS进程
+        try:
+            ros_proc.terminate()
+            ros_proc.join(timeout=5.0)
+            if ros_proc.is_alive():
+                print("强制终止ROS进程")
+                ros_proc.kill()
+        except Exception as e:
+            print(f"ROS进程清理错误: {e}")
+
+        print("✅ 资源清理完成")
 
 
 if __name__ == "__main__":

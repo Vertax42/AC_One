@@ -17,7 +17,7 @@ sleep 1
 
 # Realsense
 gnome-terminal --title="realsense" -x $shell_type -i -c "cd ${workspace}; cd ../realsense; ./realsense.sh; $shell_exec"
-sleep 3
+sleep 4
 
 # Inference
-gnome-terminal --title="inference" -x $shell_type -i -c "cd ${workspace}; cd ../act; conda activate act; python inference.py; $shell_exec"   
+gnome-terminal --title="inference" -x $shell_type -i -c "cd ${workspace}; cd ../act; conda activate act; export CUDA_VISIBLE_DEVICES=0; python inference.py; $shell_exec"   

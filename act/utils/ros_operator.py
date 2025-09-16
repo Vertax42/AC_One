@@ -478,6 +478,7 @@ class RosOperator(Node):
             right_joint_state_msg.joint_pos = np.asarray(right_arm, dtype=np.float64)
 
             self.controller_arm_left_publisher.publish(left_joint_state_msg)
+            # rate.sleep()
             self.controller_arm_right_publisher.publish(right_joint_state_msg)
 
             step += 1
