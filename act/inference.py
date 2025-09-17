@@ -160,7 +160,7 @@ def get_model_config(args):
         # 更新 action_dim
         policy_config["action_dim"] *= 2  # 双臂预测
         policy_config["action_dim"] += 10 if args.use_base else 0
-        policy_config["action_dim"] *= 2
+        # 不再需要额外的*2，因为add_action_output=False
 
         action_dim = policy_config["action_dim"]
         states_dim = policy_config["states_dim"]
@@ -239,10 +239,10 @@ def get_depth_image(observation, camera_names):
 
 
 def apply_gripper_gate(action_value, gate):
-    min_gripper = 0
-    max_gripper = 5
+    min_gripper = -0.07
+    # max_gripper = -2.8
 
-    return min_gripper if action_value < gate else max_gripper
+    return action_value if action_value < gate else min_gripper
 
 
 def get_obervations(args, timestep, ros_operator):
@@ -400,11 +400,11 @@ def ros_process(
             right_action = action[gripper_idx[0] + 1 : gripper_idx[1] + 1]
             if gripper_gate != -1:
                 right_action[gripper_idx[0]] = apply_gripper_gate(
-                    left_action[gripper_idx[0]], gripper_gate
+                    right_action[gripper_idx[0]], gripper_gate
                 )
 
             ros_operator.follow_arm_publish(left_action, right_action)
-
+            print(f"{left_action=}", f"{right_action=}", left_action, right_action)
             if args.use_base:
                 action_base = action[gripper_idx[1] + 1 : gripper_idx[1] + 1 + 10]
                 ros_operator.set_robot_base_target(action_base)
@@ -514,7 +514,12 @@ def inference_process(args, config, shm_dict, shapes, ros_proc):
     )
 
     def post_process(a):
-        return a * stats["action_std"] + stats["action_mean"]
+        # 使用states的统计信息进行反归一化，因为模型训练时使用的是states归一化
+        # a是14维：前7维是左臂，后7维是右臂
+        # left_states和right_states统计信息完全相同，直接使用left_states
+        processed_action = a * stats["left_states_std"] + stats["left_states_mean"]
+
+        return processed_action
 
     try:
         # 明确指定使用GPU 0
@@ -691,6 +696,15 @@ def inference_process(args, config, shm_dict, shapes, ros_proc):
 
             action = post_process(raw_action[0])
 
+            # 调试信息：查看夹爪值
+            print(
+                f"模型原始输出夹爪 - 左臂: {raw_action[0][6]:.6f}, 右臂: {raw_action[0][13]:.6f}"
+            )
+            print(f"归一化后夹爪 - 左臂: {action[6]:.6f}, 右臂: {action[13]:.6f}")
+            print(
+                f"夹爪统计 - 均值: {stats['action_mean'][6]:.6f}, 标准差: {stats['action_std'][6]:.6f}"
+            )
+
             robot_action(action, shm_dict)
 
             timestep += 1
@@ -709,7 +723,6 @@ def parse_args(known=False):
     parser.add_argument(
         "--max_publish_step", type=int, default=3600, help="max publish step"
     )
-
     # 数据集和检查点设置
     parser.add_argument(
         "--ckpt_dir", type=str, default=Path.joinpath(ROOT, "weights"), help="ckpt dir"
@@ -765,7 +778,7 @@ def parse_args(known=False):
         "--backbone", type=str, default="resnet18", help="backbone model architecture"
     )
     parser.add_argument(
-        "--chunk_size", type=int, default=30, help="chunk size for input data"
+        "--chunk_size", type=int, default=50, help="chunk size for input data"
     )
     parser.add_argument(
         "--hidden_dim", type=int, default=512, help="hidden layer dimension size"

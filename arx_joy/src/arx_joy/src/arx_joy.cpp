@@ -25,7 +25,7 @@ int main(int argc, char **argv) {
   can.setGetMsgContentFunction(exchangeCanMsg);
   can.Init("can6");
   can.closeReset();
-  rclcpp::Rate rate(100);
+  rclcpp::Rate rate(500);
   while (rclcpp::ok()) {
     int button[8];
     can.LoadMutexMsg();

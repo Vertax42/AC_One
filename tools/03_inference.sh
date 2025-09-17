@@ -10,9 +10,13 @@ gnome-terminal -t "can1" -x bash -c "cd ${workspace}; cd ../ARX_CAN/arx_can; ./a
 sleep 0.3
 gnome-terminal -t "can3" -x bash -c "cd ${workspace}; cd ../ARX_CAN/arx_can; ./arx_can3.sh; exec bash;"
 sleep 0.3
+gnome-terminal -t "can6" -x bash -c "cd ${workspace}/../ARX_CAN/arx_can; ./arx_can6.sh; exec bash;"
+sleep 0.3
 
 # Ac_one
 gnome-terminal --title="lift" -x $shell_type -i -c "cd ../ROS2/X5_ws; source install/setup.bash; ros2 launch arx_x5_controller v2_joint_control.launch.py; $shell_exec"
+sleep 1
+gnome-terminal --title="joy" -x $shell_type -i -c "cd ${workspace}/../arx_joy; source install/setup.bash; ros2 run arx_joy arx_joy; $shell_exec"
 sleep 1
 
 # Realsense

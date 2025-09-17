@@ -152,8 +152,8 @@ def collect_information(args, ros_operator, voice_engine):
     # 初始化机器人基础位置
     # ros_operator.init_robot_base_pose()
 
-    gripper_idx = [6, 13]
-    gripper_close = -2.1
+    # gripper_idx = [6, 13]
+    # gripper_close = -2.1
 
     while (count < args.max_timesteps) and rclpy.ok():
         obs_dict = ros_operator.get_observation(ts=count)
@@ -173,10 +173,9 @@ def collect_information(args, ros_operator, voice_engine):
         action_velocity = obs_dict["base_velocity"]
 
         # 夹爪动作处理
-        for idx in gripper_idx:
-            action[idx] = 0 if action[idx] > gripper_close else action[idx]
-        action_eef[6] = 0 if action_eef[6] > gripper_close else action_eef[6]
-        action_eef[13] = 0 if action_eef[13] > gripper_close else action_eef[13]
+        # for idx in gripper_idx:
+        #     action[idx] = 0 if action[idx] > gripper_close else action[idx]
+        #     action_eef[idx] = 0 if action_eef[idx] > gripper_close else action_eef[idx]
 
         # 检查是否超过100帧，并判断是否应该停止
         if count > 100:

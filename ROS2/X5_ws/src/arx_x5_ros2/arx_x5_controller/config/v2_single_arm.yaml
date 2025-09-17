@@ -5,3 +5,4 @@
     arm_pub_topic_name: arm_status
     arm_sub_topic_name: arm_cmd
     arm_end_type: 2
+    joint_torque_limits: [40.0, 40.0, 40.0, 15.0, 15.0, 10.0, 1.5]

@@ -5,7 +5,8 @@
     arm_pub_topic_name: arm_slave_l_status
     arm_sub_topic_name: arm_master_l_status
     arm_end_type: 2
-    
+    joint_torque_limits: [40.0, 40.0, 40.0, 15.0, 15.0, 10.0, 1.5]
+
 /arm_slave_r:
   ros__parameters:
     arm_can_id: can3
@@ -13,3 +14,4 @@
     arm_pub_topic_name: arm_slave_r_status
     arm_sub_topic_name: arm_master_r_status
     arm_end_type: 2
+    joint_torque_limits: [40.0, 40.0, 40.0, 15.0, 15.0, 10.0, 1.5]
