@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.8)
 project(arx_x5_controller)
 
+# 抑制ROS2消息生成的警告
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    add_compile_options(-Wno-stringop-overflow)
+endif()
+
 find_package(ament_cmake REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(rclcpp REQUIRED)

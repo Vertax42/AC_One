@@ -177,8 +177,8 @@ def collect_information(args, ros_operator, voice_engine):
         #     action[idx] = 0 if action[idx] > gripper_close else action[idx]
         #     action_eef[idx] = 0 if action_eef[idx] > gripper_close else action_eef[idx]
 
-        # 检查是否超过100帧，并判断是否应该停止
-        if count > 100:
+        # 检查是否超过2s，并判断是否应该停止
+        if count > args.frame_rate * 2:
             if all(abs(val - init) <= 0.1 for val, init in zip(action, init_pos)):
                 break
 

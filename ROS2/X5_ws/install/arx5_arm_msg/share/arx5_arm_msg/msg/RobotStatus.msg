@@ -1,7 +1,1 @@
-std_msgs/Header header
-
-float64[6] end_pos
-
-float64[7] joint_pos
-float64[7] joint_vel
-float64[7] joint_cur
+/home/Xense/AC_One/ROS2/X5_ws/src/arxmsgros2/arx5_arm_msg/msg/RobotStatus.msg

@@ -1,0 +1,1 @@
+/home/Xense/AC_One/ROS2/X5_ws/build/arx5_arm_msg/rosidl_generator_py/arx5_arm_msg/msg/_robot_status.py

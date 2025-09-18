@@ -143,19 +143,28 @@ void X5Controller::CmdCallback(const arx5_arm_msg::msg::RobotCmd::SharedPtr msg)
 }
 
 void X5Controller::ArxJoyCallback(const std_msgs::msg::Int32MultiArray::SharedPtr msg) {
+  // 调试信息：打印所有按键状态
+  RCLCPP_DEBUG(this->get_logger(), "Joy buttons: [%d, %d, %d, %d]", 
+               msg->data.size() > 0 ? msg->data[0] : -1,
+               msg->data.size() > 1 ? msg->data[1] : -1,
+               msg->data.size() > 2 ? msg->data[2] : -1,
+               msg->data.size() > 3 ? msg->data[3] : -1);
+  
   if (msg->data[0] == 1) {
+    RCLCPP_INFO(this->get_logger(), "Button 0 pressed: G_COMPENSATION");
     SetRobotState(InterfacesThread::state::G_COMPENSATION);
   }
   else if (msg->data[1] == 1) {
-    SetRobotState(InterfacesThread::state::GO_HOME);
+    RCLCPP_INFO(this->get_logger(), "Button 1 pressed: SmoothGoHome");
+    SmoothGoHome(3.0, 0.0, utils::easeInOutCubic);
   }
   else if (msg->data[2] == 1) {
+    RCLCPP_INFO(this->get_logger(), "Button 2 pressed: PROTECT");
     SetRobotState(InterfacesThread::state::PROTECT);
   }
   else if (msg->data.size() > 3 && msg->data[3] == 1) {
-    // Test SmoothGoHome functionality
-    RCLCPP_INFO(this->get_logger(), "Testing SmoothGoHome from joystick command");
-    SmoothGoHome(3.0, 0.0, utils::easeInOutCubic);
+    RCLCPP_INFO(this->get_logger(), "Button 3 pressed: GO_HOME");
+    SetRobotState(InterfacesThread::state::GO_HOME);
   }
 }
 

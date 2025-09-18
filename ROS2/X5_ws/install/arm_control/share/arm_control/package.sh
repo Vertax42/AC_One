@@ -80,10 +80,10 @@ _colcon_package_sh_source_script() {
 # source sh hooks
 _colcon_package_sh_source_script "$COLCON_CURRENT_PREFIX/share/arm_control/hook/cmake_prefix_path.sh"
 _colcon_package_sh_source_script "$COLCON_CURRENT_PREFIX/share/arm_control/hook/ld_library_path_lib.sh"
+_colcon_package_sh_source_script "$COLCON_CURRENT_PREFIX/share/arm_control/hook/pythonpath.sh"
 _colcon_package_sh_source_script "$COLCON_CURRENT_PREFIX/share/arm_control/hook/ros_package_path.sh"
 _colcon_package_sh_source_script "$COLCON_CURRENT_PREFIX/share/arm_control/hook/catkin_pythonpath.sh"
 _colcon_package_sh_source_script "$COLCON_CURRENT_PREFIX/share/arm_control/hook/pkg_config_path.sh"
-_colcon_package_sh_source_script "$COLCON_CURRENT_PREFIX/share/arm_control/hook/pkg_config_path_multiarch.sh"
 
 unset _colcon_package_sh_source_script
 unset COLCON_CURRENT_PREFIX
