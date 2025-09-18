@@ -35,12 +35,13 @@ log_step() {
 # 清理函数 - 关闭所有启动的终端
 cleanup_terminals() {
     log_info "开始清理所有启动的终端..."
-
-    # 1. 首先关闭数据采集进程
+    
+    # 1. 首先关闭数据采集进程，给它时间保存数据
     log_info "关闭数据采集进程..."
     pkill -f "collect.py" 2>/dev/null || true
-    sleep 1
-
+    log_info "等待数据采集进程完成数据保存..."
+    sleep 2  # 给collect.py足够时间保存数据
+    
     # 2. 关闭终端窗口
     local titles=("collect" "can1" "can3" "can6" "lift" "joy" "realsense")
     for title in "${titles[@]}"; do
@@ -62,20 +63,45 @@ cleanup_terminals() {
             log_warn "请手动关闭终端窗口"
         fi
     done
-
+    
     # 3. 关闭ROS2相关进程
     log_info "关闭ROS2相关进程..."
     pkill -f "arx_x5_controller" 2>/dev/null || true
     pkill -f "arx_joy" 2>/dev/null || true
     pkill -f "realsense" 2>/dev/null || true
     sleep 1
-
+    
     # 4. 关闭CAN相关进程
     log_info "关闭CAN相关进程..."
     pkill -f "arx_can" 2>/dev/null || true
     pkill -f "can1\|can3\|can6" 2>/dev/null || true
-
+    
     log_info "清理完成"
+}
+
+# 只清理进程，不关闭终端窗口
+cleanup_processes() {
+    log_info "开始清理所有启动的进程..."
+    
+    # 1. 首先关闭数据采集进程，给它时间保存数据
+    log_info "关闭数据采集进程..."
+    pkill -f "collect.py" 2>/dev/null || true
+    log_info "等待数据采集进程完成数据保存..."
+    sleep 3  # 给collect.py足够时间保存数据
+    
+    # 2. 关闭ROS2相关进程
+    log_info "关闭ROS2相关进程..."
+    pkill -f "arx_x5_controller" 2>/dev/null || true
+    pkill -f "arx_joy" 2>/dev/null || true
+    pkill -f "realsense" 2>/dev/null || true
+    sleep 1
+    
+    # 3. 关闭CAN相关进程
+    log_info "关闭CAN相关进程..."
+    pkill -f "arx_can" 2>/dev/null || true
+    pkill -f "can1\|can3\|can6" 2>/dev/null || true
+    
+    log_info "进程清理完成，终端窗口保留"
 }
 
 # 检查CAN接口是否就绪
@@ -198,11 +224,21 @@ manual_cleanup() {
     log_info "手动清理完成"
 }
 
+# 手动清理进程函数
+manual_cleanup_processes() {
+    log_info "执行手动清理进程..."
+    cleanup_processes
+    log_info "手动清理完成"
+}
+
 # 主函数
 main() {
     # 检查命令行参数
     if [ "$1" = "--cleanup" ] || [ "$1" = "-c" ]; then
         manual_cleanup
+        exit 0
+    elif [ "$1" = "--cleanup-processes" ] || [ "$1" = "-cp" ]; then
+        manual_cleanup_processes
         exit 0
     fi
     
@@ -244,7 +280,7 @@ main() {
         echo \"ROS2版本: ros2 humble\";
         ros2 launch arx_x5_controller v2_collect.launch.py;
         $shell_exec"
-    sleep 3
+    sleep 2
 
     # 启动手柄控制 (使用ros_openpi环境)
     log_step "启动手柄控制 (ros_openpi环境)..."
@@ -265,7 +301,7 @@ main() {
         cd ${workspace}/../../realsense;
         ./realsense.sh;
         $shell_exec"
-    sleep 4
+    sleep 3
 
     # 临时激活环境进行检查
     eval "$(mamba shell hook --shell bash)"
@@ -293,7 +329,8 @@ main() {
         echo \"激活环境: ros_openpi\";
         echo \"Python版本: \$(python --version)\";
         echo \"Python路径: \$(which python)\";
-        python collect.py --episode_idx -1 --num_episodes 50 --max_timesteps 3600 --frame_rate 60;
+        echo \"ROS2版本: \$ROS_DISTRO\";
+        python collect.py --episode_idx -1 --num_episodes 50 --max_timesteps 3600 --frame_rate 60 2>/dev/null;
         $shell_exec"
 
     log_info "数据采集系统启动完成！"
@@ -337,17 +374,17 @@ main() {
     log_info "7. 按 Ctrl+C 键退出数据采集系统"
     log_info ""
     log_info "清理说明："
-    log_info "  - 按 Enter 键将退出脚本并清理所有终端"
-    log_info "  - 如需单独清理所有终端，请运行: $0 --cleanup"
-    log_info "  - 或使用: $0 -c"
+    log_info "  - 按 Enter 键将退出脚本并清理所有进程（保留终端窗口）"
+    log_info "  - 如需清理所有进程和终端，请运行: $0 --cleanup 或 $0 -c"
+    log_info "  - 如需只清理进程保留终端，请运行: $0 --cleanup-processes 或 $0 -cp"
     
     # 保持脚本运行，等待用户输入
     log_info ""
-    log_info "按 Enter 键退出脚本并清理所有终端..."
+    log_info "按 Enter 键退出脚本并清理所有进程（终端窗口保留）..."
     read -r
-    log_info "开始清理所有终端..."
-    cleanup_terminals
-    log_info "脚本退出，所有终端已清理"
+    log_info "开始清理所有进程..."
+    cleanup_processes
+    log_info "脚本退出，所有进程已清理，终端窗口保留"
 
 }
 

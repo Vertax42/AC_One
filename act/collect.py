@@ -95,7 +95,8 @@ def collect_detect(args, start_episode, voice_engine, ros_operator):
 
     # 键盘触发录制
     if args.key_collect:
-        input("Enter any key to record :")
+        # input("Enter any key to record :")
+        pass
     else:
         init_done = False
 
@@ -132,7 +133,7 @@ def collect_detect(args, start_episode, voice_engine, ros_operator):
             rate.sleep()
 
         # 如果是因为Ctrl+C退出，直接返回False
-        if exit_flag:
+        if exit_flag or not rclpy.ok():
             return False
 
         voice_process(voice_engine, "go")

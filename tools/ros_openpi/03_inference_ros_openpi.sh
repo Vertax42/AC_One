@@ -256,9 +256,11 @@ main() {
         eval \"\$(mamba shell hook --shell bash)\";
         mamba activate ros_openpi;
         cd ${workspace}/../../act;
+        source ../../ROS2/X5_ws/install/setup.bash;
         echo \"激活环境: ros_openpi\";
         echo \"Python版本: \$(python --version)\";
         echo \"Python路径: \$(which python)\";
+        echo \"ROS2版本: \$ROS_DISTRO\";
         export CUDA_VISIBLE_DEVICES=0;
         python inference.py;
         $shell_exec"
