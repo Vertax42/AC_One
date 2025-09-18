@@ -36,7 +36,7 @@ check_mamba_env() {
         return 1
     fi
 
-    if ! mamba info --envs | grep -q "ros_openpi"; then
+    if ! mamba info --envs 2>/dev/null | grep -q "ros_openpi" 2>/dev/null; then
         log_error "Mamba环境 'ros_openpi' 不存在"
         return 1
     fi
@@ -121,6 +121,36 @@ build_workspace() {
     fi
 }
 
+# 安全的ROS2包检查函数
+check_ros2_package() {
+    local package_name="$1"
+    local temp_file=$(mktemp)
+    
+    # 检查ros2命令是否可用
+    if ! command -v ros2 &> /dev/null; then
+        log_warn "ros2命令不可用"
+        rm -f "$temp_file"
+        return 1
+    fi
+    
+    # 将ros2 pkg list的输出重定向到临时文件，避免管道问题
+    if ros2 pkg list > "$temp_file" 2>/dev/null; then
+        if grep -q "^${package_name}$" "$temp_file" 2>/dev/null; then
+            rm -f "$temp_file"
+            return 0
+        else
+            # 调试：显示相似的包名
+            local similar_packages=$(grep "$package_name" "$temp_file" 2>/dev/null || echo "无相似包名")
+            log_warn "未找到完全匹配的包 '$package_name'，相似包名: $similar_packages"
+        fi
+    else
+        log_warn "无法获取ROS2包列表"
+    fi
+    
+    rm -f "$temp_file"
+    return 1
+}
+
 # 验证编译结果
 verify_build() {
     log_step "验证编译结果..."
@@ -133,23 +163,58 @@ verify_build() {
 
     # source setup
     if [ -f "install/setup.bash" ]; then
+        log_info "Sourcing ROS2 setup..."
         source install/setup.bash
         log_info "成功source setup.bash"
+        
+        # 设置环境变量
+        export AMENT_PREFIX_PATH="$PWD/install:$AMENT_PREFIX_PATH"
+        export CMAKE_PREFIX_PATH="$PWD/install:$CMAKE_PREFIX_PATH"
+        export ROS_PACKAGE_PATH="$PWD/install/share:$ROS_PACKAGE_PATH"
+        
     else
         log_error "setup.bash不存在！"
         return 1
     fi
 
     # 检查包是否可用
-    if ros2 pkg list | grep -q "arx_x5_controller"; then
-        log_info "arx_x5_controller包可用"
+    log_info "检查可用的ROS2包..."
+    
+    # 检查arx_x5_controller包
+    if check_ros2_package "arx_x5_controller"; then
+        log_info "✓ arx_x5_controller包可用"
     else
-        log_warn "arx_x5_controller包未找到"
+        log_warn "✗ arx_x5_controller包未找到"
+    fi
+    
+    # 检查pico_xr_teleop包
+    if check_ros2_package "pico_xr_teleop"; then
+        log_info "✓ pico_xr_teleop包可用"
+    else
+        log_warn "✗ pico_xr_teleop包未找到"
+    fi
+    
+    # 检查arm_control包
+    if check_ros2_package "arm_control"; then
+        log_info "✓ arm_control包可用"
+    else
+        log_warn "✗ arm_control包未找到"
+    fi
+    
+    # 检查arx5_arm_msg包
+    if check_ros2_package "arx5_arm_msg"; then
+        log_info "✓ arx5_arm_msg包可用"
+    else
+        log_warn "✗ arx5_arm_msg包未找到"
     fi
 
     # 检查Python路径
     log_info "检查编译后的Python路径..."
-    grep -r "python3.11" install/ | head -3 || log_warn "未找到Python3.11相关路径"
+    if [ -d "install/" ]; then
+        grep -r "python3.11" install/ 2>/dev/null | head -3 || log_warn "未找到Python3.11相关路径"
+    else
+        log_warn "install目录不存在"
+    fi
 
     log_info "验证完成"
 }

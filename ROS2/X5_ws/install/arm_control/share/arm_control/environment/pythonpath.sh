@@ -1,3 +1,1 @@
-# generated from ament_package/template/environment_hook/pythonpath.sh.in
-
-ament_prepend_unique_value PYTHONPATH "$AMENT_CURRENT_PREFIX/lib/python3.11/site-packages"
+/home/vertax/AC_One/ROS2/X5_ws/build/arm_control/ament_cmake_environment_hooks/pythonpath.sh

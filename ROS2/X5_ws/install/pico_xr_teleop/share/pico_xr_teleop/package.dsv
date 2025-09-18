@@ -1,0 +1,8 @@
+source;share/pico_xr_teleop/hook/cmake_prefix_path.ps1
+source;share/pico_xr_teleop/hook/cmake_prefix_path.dsv
+source;share/pico_xr_teleop/hook/cmake_prefix_path.sh
+source;share/pico_xr_teleop/local_setup.bash
+source;share/pico_xr_teleop/local_setup.dsv
+source;share/pico_xr_teleop/local_setup.ps1
+source;share/pico_xr_teleop/local_setup.sh
+source;share/pico_xr_teleop/local_setup.zsh

@@ -13,6 +13,8 @@ find_package(std_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(arm_control REQUIRED)  # 确保这个包存在
 find_package(arx5_arm_msg REQUIRED)  # 确保这个包存在
+find_package(Eigen3 REQUIRED)
+find_package(Boost REQUIRED COMPONENTS filesystem)
 
 include_directories(include)
 
@@ -25,9 +27,9 @@ else ()
 endif ()
 
 # 添加可执行文件 X5Controller
-add_executable(X5Controller src/X5Controller.cpp src/utils.cpp)
+add_executable(X5Controller src/X5Controller.cpp src/utils.cpp src/log4z.cpp src/utils_common.cpp)
 target_include_directories(X5Controller PUBLIC lib/arx_hardware_interface/include lib/arx_x5_src/include)
-target_link_libraries(X5Controller ${DEPEND_LIB})
+target_link_libraries(X5Controller ${DEPEND_LIB} Eigen3::Eigen Boost::filesystem)
 ament_target_dependencies(X5Controller rclcpp ament_index_cpp std_msgs arx5_arm_msg arm_control)
 
 # 添加可执行文件 KeyBoard
