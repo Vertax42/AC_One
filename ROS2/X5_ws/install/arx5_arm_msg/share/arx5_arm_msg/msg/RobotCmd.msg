@@ -1,1 +1,1 @@
-/home/Xense/AC_One/ROS2/X5_ws/src/arxmsgros2/arx5_arm_msg/msg/RobotCmd.msg
+/home/vertax/AC_One/ROS2/X5_ws/src/arxmsgros2/arx5_arm_msg/msg/RobotCmd.msg

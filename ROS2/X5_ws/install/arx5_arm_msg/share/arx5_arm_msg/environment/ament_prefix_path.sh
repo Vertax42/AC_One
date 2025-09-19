@@ -1,1 +1,1 @@
-/home/Xense/miniconda3/envs/ros_openpi/share/ament_cmake_core/cmake/environment_hooks/environment/ament_prefix_path.sh
+/home/vertax/anaconda3/envs/ros_openpi/share/ament_cmake_core/cmake/environment_hooks/environment/ament_prefix_path.sh

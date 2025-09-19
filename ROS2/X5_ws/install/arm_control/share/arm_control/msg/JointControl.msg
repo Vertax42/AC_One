@@ -1,4 +1,1 @@
-float32[8] joint_pos
-float32[8] joint_vel
-float32[8] joint_cur
-int32 mode
+/home/vertax/AC_One/ROS2/X5_ws/src/arxmsgros2/arm_control/msg/JointControl.msg

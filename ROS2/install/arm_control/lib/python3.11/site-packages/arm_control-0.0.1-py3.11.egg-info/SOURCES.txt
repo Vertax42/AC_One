@@ -1,6 +1,0 @@
-setup.py
-arm_control/__init__.py
-arm_control.egg-info/PKG-INFO
-arm_control.egg-info/SOURCES.txt
-arm_control.egg-info/dependency_links.txt
-arm_control.egg-info/top_level.txt
