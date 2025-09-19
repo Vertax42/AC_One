@@ -72,6 +72,11 @@ public:
         double control_dt = 0.01,
         int print_interval = 100
     );
+    
+    /**
+     * @brief Destructor - ensures thread safety
+     */
+    ~SmoothJointInterpolator();
 
     /**
      * @brief Execute smooth interpolation
@@ -79,13 +84,15 @@ public:
      * @param duration Interpolation duration (seconds)
      * @param gripper_target Target gripper position (meters)
      * @param interpolation_func Interpolation function (default easeInOutQuad)
+     * @param node ROS2 node (kept for compatibility, not used)
      * @return Whether execution was successful
      */
     bool interpolate(
         const std::vector<double>& target_poses,
         double duration,
         double gripper_target = 0.0,
-        std::function<double(double)> interpolation_func = easeInOutQuad
+        std::function<double(double)> interpolation_func = easeInOutQuad,
+        rclcpp::Node* node = nullptr
     );
 
     /**
@@ -112,10 +119,6 @@ public:
      */
     bool isInterpolating() const;
 
-    /**
-     * @brief Stop interpolation
-     */
-    void stopInterpolation();
 
 private:
     std::shared_ptr<void> controller_;         // Shared pointer to X5Controller instance
@@ -140,6 +143,22 @@ private:
      * @return Whether setting was successful
      */
     bool setJointCommand(const std::vector<double>& poses, double gripper_pos);
+
+    /**
+     * @brief Internal async interpolation function
+     * @param target_poses Target joint positions (6 joints)
+     * @param duration Interpolation duration (seconds)
+     * @param gripper_target Target gripper position (meters)
+     * @param interpolation_func Interpolation function
+     * @param step_num Number of interpolation steps
+     */
+    void interpolateAsync(
+        const std::vector<double>& target_poses,
+        double duration,
+        double gripper_target,
+        std::function<double(double)> interpolation_func,
+        int step_num
+    );
 };
 
 }  // namespace arx::x5::utils

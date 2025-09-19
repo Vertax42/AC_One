@@ -89,7 +89,7 @@ X5Controller::X5Controller() : Node("x5_controller_node") {
     // G_COMPENSATION mode
     RCLCPP_INFO(this->get_logger(), "remote master mode started");
     joint_state_publisher_ = this->create_publisher<arx5_arm_msg::msg::RobotStatus>(this->declare_parameter("arm_pub_topic_name", "arm_status"), 10);
-    SetRobotState(InterfacesThread::state::G_COMPENSATION);
+    // SetRobotState(InterfacesThread::state::G_COMPENSATION);
     // timer for publishing joint information
     timer_ = this->create_wall_timer(std::chrono::milliseconds(1), std::bind(&X5Controller::PubState, this));
   } else if (arm_control_type == "remote_slave") {
@@ -424,12 +424,13 @@ void X5Controller::SmoothGoHome(
       interpolation_func = utils::easeInOutCubic;
     }
     
-    // execute smooth interpolation with configurable parameters
+    // execute smooth interpolation
     bool success = smooth_interpolator_->interpolate(
       go_home_positions_, // home position
       duration,  // configurable duration
       gripper_target,  // configurable gripper target position
-      interpolation_func  // configurable interpolation function
+      interpolation_func,  // configurable interpolation function
+      this  // pass this node for spin_some
     );
     
     if (success) {

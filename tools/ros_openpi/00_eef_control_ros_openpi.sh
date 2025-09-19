@@ -39,20 +39,23 @@ cleanup_terminals() {
     pkill -f "arx_joy" 2>/dev/null || true
     sleep 1
 
-    # 2. 关闭终端窗口 - 只关闭脚本启动的特定窗口
+    # 2. 关闭终端窗口 - 更精确的匹配，避免误关闭Cursor
     local titles=("ac_one" "can1" "can3" "can6" "joy")
     for title in "${titles[@]}"; do
         log_info "关闭终端窗口: $title"
         if command -v wmctrl &> /dev/null; then
-            # 更精确地匹配窗口标题，避免误关闭Cursor终端
-            local window_ids=$(wmctrl -l 2>/dev/null | grep -E "gnome-terminal.*$title|Terminal.*$title" | awk '{print $1}')
+            # 获取窗口ID并检查是否存在，使用更精确的匹配
+            local window_ids=$(wmctrl -l 2>/dev/null | grep -E "gnome-terminal.*$title|terminator.*$title" | awk '{print $1}')
             if [ -n "$window_ids" ]; then
                 echo "$window_ids" | while read -r window_id; do
                     if [ -n "$window_id" ]; then
-                        # 检查窗口是否仍然存在
-                        if wmctrl -l 2>/dev/null | grep -q "^$window_id "; then
+                        # 再次确认窗口标题，避免误关闭
+                        local window_title=$(wmctrl -l 2>/dev/null | grep "^$window_id" | cut -d' ' -f4-)
+                        if echo "$window_title" | grep -q "$title"; then
                             wmctrl -i -c "$window_id" 2>/dev/null || true
-                            log_info "  已关闭窗口: $window_id"
+                            log_info "  已关闭窗口: $window_title"
+                        else
+                            log_info "  跳过窗口: $window_title (不匹配)"
                         fi
                     fi
                 done
@@ -233,8 +236,8 @@ main() {
     log_info "  - Python版本: $(python --version)"
     
     # 确保环境激活 - 再次激活以确保ROS2命令可用
-    eval "$(mamba shell hook --shell bash)"
-    mamba activate ros_openpi
+    # eval "$(mamba shell hook --shell bash)"
+    # mamba activate ros_openpi
     source ../../ROS2/X5_ws/install/setup.bash
     
     # 检查ROS2版本 - 确保在正确环境中
@@ -285,6 +288,7 @@ main() {
 # 错误处理 - 移除严格模式
 # set -e  # 取消严格模式，允许脚本在遇到错误时继续运行
 # trap 'log_error "脚本执行出错，行号: $LINENO"' ERR  # 取消错误陷阱
+
 
 # 执行主函数
 main "$@"

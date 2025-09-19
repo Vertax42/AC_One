@@ -102,7 +102,7 @@ def collect_detect(args, start_episode, voice_engine, ros_operator):
 
         while not init_done and rclpy.ok() and not exit_flag:
             obs_dict = ros_operator.get_observation()
-            if obs_dict == None:
+            if obs_dict is None:
                 print("synchronization frame")
                 rate.sleep()
 
@@ -118,7 +118,11 @@ def collect_detect(args, start_episode, voice_engine, ros_operator):
 
             if 0 in triggered:
                 init_done = True
-                init_pos = action
+                # 使用机器人按下按钮时的实际位置作为初始位置
+                init_pos = action.copy()  # 记录当前实际的关节位置
+                print(f"Recorded initial position: {init_pos}")
+                # 立即开始记录数据，不等待同步
+                print("Button pressed - starting immediate data collection...")
             if 2 in triggered:
                 delete_idx = start_episode - 1
 
@@ -129,49 +133,73 @@ def collect_detect(args, start_episode, voice_engine, ros_operator):
                     voice_process(voice_engine, f"delete {delete_idx}")
 
             if init_done:
-                voice_process(voice_engine, f"{start_episode % 100}")
+                pass
             rate.sleep()
 
         # 如果是因为Ctrl+C退出，直接返回False
         if exit_flag or not rclpy.ok():
             return False
 
-        voice_process(voice_engine, "go")
-
         return True
 
 
-def collect_information(args, ros_operator, voice_engine):
+def collect_information(args, ros_operator, voice_engine, episode_number):
     timesteps = []
     actions = []
     actions_eef = []
-    action_bases = []
-    action_velocities = []
     count = 0
     rate = Rate(args.frame_rate)
 
-    # 初始化机器人基础位置
-    # ros_operator.init_robot_base_pose()
+    # 用于跟踪回到初始位置的时间
+    return_home_start_time = None
 
     # gripper_idx = [6, 13]
     # gripper_close = -2.1
+
+    # 立即开始记录数据，确保第一帧就是按下0键时的位置
+    print("Starting data recording immediately...")
+    first_frame_recorded = False
+
+    # 立即尝试获取第一帧数据，不等待
+    print("Attempting to record first frame immediately...")
+    while not first_frame_recorded and rclpy.ok():
+        obs_dict = ros_operator.get_observation(ts=count)
+        action_dict = ros_operator.get_action()
+
+        if obs_dict is not None and action_dict is not None:
+            # 立即记录第一帧
+            action = deepcopy(obs_dict["qpos"])
+            action_eef = deepcopy(obs_dict["eef"])
+            # 收集数据
+            timesteps.append(obs_dict)
+            actions.append(action)
+            actions_eef.append(action_eef)
+
+            count += 1
+            first_frame_recorded = True
+            print(f"First frame recorded immediately at position: {action}")
+            print("Data recording started successfully!")
+
+            # 在记录第一帧后立即播放语音提示
+            voice_process(voice_engine, f"{episode_number % 100}")
+            voice_process(voice_engine, "go")
+        else:
+            print("Waiting for first frame data...")
+        rate.sleep()
 
     while (count < args.max_timesteps) and rclpy.ok():
         obs_dict = ros_operator.get_observation(ts=count)
         action_dict = ros_operator.get_action()
 
-        # 同步帧检测
+        # 同步帧检测 - 减少丢弃帧数
         if obs_dict is None or action_dict is None:
-            print("Synchronization frame")
+            print(f"Synchronization frame {count} - waiting for data...")
             rate.sleep()
-
             continue
 
         # 获取动作和观察值
         action = deepcopy(obs_dict["qpos"])
         action_eef = deepcopy(obs_dict["eef"])
-        action_base = obs_dict["robot_base"]
-        action_velocity = obs_dict["base_velocity"]
 
         # 夹爪动作处理
         # for idx in gripper_idx:
@@ -180,18 +208,30 @@ def collect_information(args, ros_operator, voice_engine):
 
         # 检查是否超过2s，并判断是否应该停止
         if count > args.frame_rate * 2:
-            if all(abs(val - init) <= 0.1 for val, init in zip(action, init_pos)):
-                break
+            if all(abs(val - init) <= 0.05 for val, init in zip(action, init_pos)):
+                # 检测到回到初始位置，开始计时保持2秒
+                if return_home_start_time is None:
+                    return_home_start_time = time.time()
+                    print(
+                        "Detected return to home position, keeping recording for 2 more seconds..."
+                    )
+
+                # 检查是否已经保持2秒
+                if time.time() - return_home_start_time >= 2.0:
+                    print(
+                        "2 seconds elapsed after returning home, stopping recording..."
+                    )
+                    break
+            else:
+                # 如果偏离了初始位置，重置计时器
+                if return_home_start_time is not None:
+                    return_home_start_time = None
 
         # 收集数据
         timesteps.append(obs_dict)
         actions.append(action)
         actions_eef.append(action_eef)
-        action_bases.append(action_base)
-        action_velocities.append(action_velocity)
-
         count += 1
-        print(f"Frame data: {count}")
 
         if not rclpy.ok():
             exit(-1)
@@ -201,7 +241,7 @@ def collect_information(args, ros_operator, voice_engine):
     print(f"\nlen(timesteps): {len(timesteps)}")
     print(f"len(actions)  : {len(actions)}")
 
-    return timesteps, actions, actions_eef, action_bases, action_velocities
+    return timesteps, actions, actions_eef
 
 
 def compress_and_pad_images(data_dict, camera_names, use_depth, quality=50):
@@ -262,7 +302,7 @@ def create_and_write_hdf5(
             if args.use_depth_image:
                 depth.create_dataset(cam_name, depth_shape, "uint8", chunks=depth_chunk)
 
-        # 创建观测和动作数据集
+        # create observation and action dicts
         state_dim = 14
         eef_dim = 14
         obs_specs = {
@@ -270,14 +310,10 @@ def create_and_write_hdf5(
             "eef": eef_dim,
             "qvel": state_dim,
             "effort": state_dim,
-            "robot_base": 6,
-            "base_velocity": 4,
         }
         act_specs = {
             "action": state_dim,
             "action_eef": eef_dim,
-            "action_base": 6,
-            "action_velocity": 4,
         }
 
         for name, dim in obs_specs.items():
@@ -295,12 +331,10 @@ def save_data(
     timesteps,
     actions,
     actions_eef,
-    action_bases,
-    action_velocities,
     ros_operator,
     dataset_path,
 ):
-    initial_data_size = len(actions)
+    data_size = len(actions)
 
     # 数据字典
     data_dict = {
@@ -308,39 +342,31 @@ def save_data(
         "/observations/qvel": [],
         "/observations/effort": [],
         "/observations/eef": [],
-        "/observations/robot_base": [],
         "/action": [],
         "/action_eef": [],
-        "/action_base": [],
-        "/action_velocity": [],
     }
 
-    # 初始化相机字典
+    # init camera dicts
     for cam_name in args.camera_names:
         data_dict[f"/observations/images/{cam_name}"] = []
         if args.use_depth_image:
             data_dict[f"/observations/images_depth/{cam_name}"] = []
 
-    # 遍历并收集数据
+    # collect datasets
     while actions and rclpy.ok():
-        action = actions.pop(0)  # 动作  当前动作
+        action = actions.pop(0)  # current action
         action_eef = actions_eef.pop(0)
-        action_base = action_bases.pop(0)
-        action_velocity = action_velocities.pop(0)
-        ts = timesteps.pop(0)  # 奖励  前一帧
+        ts = timesteps.pop(0)  # current observation
 
-        # 填充数据
+        # append data
         data_dict["/observations/qpos"].append(ts["qpos"])
         data_dict["/observations/qvel"].append(ts["qvel"])
         data_dict["/observations/eef"].append(ts["eef"])
         data_dict["/observations/effort"].append(ts["effort"])
-        data_dict["/observations/robot_base"].append(ts["robot_base"])
         data_dict["/action"].append(action)
         data_dict["/action_eef"].append(action_eef)
-        data_dict["/action_base"].append(action_base)
-        data_dict["/action_velocity"].append(action_velocity)
 
-        # 相机数据
+        # camera data
         for cam_name in args.camera_names:
             data_dict[f"/observations/images/{cam_name}"].append(ts["images"][cam_name])
             if args.use_depth_image:
@@ -348,13 +374,7 @@ def save_data(
                     ts["images_depth"][cam_name]
                 )
 
-    # 计算实际收集到的数据大小（处理episode提前终止的情况）
-    actual_data_size = len(data_dict["/action"])
-    print(
-        f"Episode terminated early: collected {actual_data_size}/{initial_data_size} frames"
-    )
-
-    # 压缩图像数据
+    # compressed image data
     padded_size, padded_size_depth = compress_and_pad_images(
         data_dict, args.camera_names, args.use_depth_image
     )
@@ -364,7 +384,7 @@ def save_data(
     # 2 图像是否压缩
     t0 = time.time()
     create_and_write_hdf5(
-        args, data_dict, dataset_path, actual_data_size, padded_size, padded_size_depth
+        args, data_dict, dataset_path, data_size, padded_size, padded_size_depth
     )
 
     voice_process(voice_engine, "Save")
@@ -415,9 +435,12 @@ def main(args):
             break
 
         print(f"Start to record episode {current_episode}")
-        timesteps, actions, actions_eef, action_bases, action_velocities = (
-            collect_information(args, ros_operator, voice_engine)
-        )
+
+        (
+            timesteps,
+            actions,
+            actions_eef,
+        ) = collect_information(args, ros_operator, voice_engine, current_episode)
 
         if not os.path.exists(datasets_dir):
             os.makedirs(datasets_dir)
@@ -430,8 +453,6 @@ def main(args):
                 timesteps,
                 actions,
                 actions_eef,
-                action_bases,
-                action_velocities,
                 ros_operator,
                 dataset_path,
             ),
@@ -487,8 +508,6 @@ def parse_arguments(known=False):
         "--use_depth_image", action="store_true", help="use depth image"
     )
 
-    # 机器人选项
-    parser.add_argument("--use_base", action="store_true", help="use robot base")
     parser.add_argument(
         "--record",
         choices=["Distance", "Speed"],

@@ -83,7 +83,7 @@ def initialize_policy_config(args):
         # 更新 action_dim
         act_config["action_dim"] *= 2  # 双臂预测
         act_config["action_dim"] += 10 if args.use_base else 0
-        act_config["action_dim"] *= 2
+        # act_config["action_dim"] *= 2
 
         return {**base_config, **act_config}
 

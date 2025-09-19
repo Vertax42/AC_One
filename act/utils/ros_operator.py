@@ -44,8 +44,8 @@ class RosOperator(Node):
     def __init__(self, args, config, in_collect=False):
         super().__init__("robot_operator")
 
-        from arm_control.msg._pos_cmd import PosCmd
-        from arm_control.msg._joint_control import JointControl
+        # from arm_control.msg._pos_cmd import PosCmd
+        # from arm_control.msg._joint_control import JointControl
         from arx5_arm_msg.msg._robot_cmd import RobotCmd
         from arx5_arm_msg.msg._robot_status import RobotStatus
 
@@ -53,16 +53,6 @@ class RosOperator(Node):
         self.config = config
 
         self.in_collect = in_collect
-
-        self.base_enable = False
-        self.robot_base_pose_init = [
-            0,
-            0,
-            0,
-        ]  # rlative, the head_pitch and height and head yaw is the adsolutly
-        self.robot_base_target = np.zeros((6,))
-        self.base_velocity_target = np.zeros((4,))
-        self.base_control_thread = None
 
         self.ctrl_state = False
         self.ctrl_state_lock = threading.Lock()
@@ -82,11 +72,6 @@ class RosOperator(Node):
         self.feedback_left_arm_deque = deque()
         self.feedback_right_arm_deque = deque()
 
-        self.base_pose_deque = deque()
-        self.robot_base_origin = deque()
-        self.robot_base_deque = deque()
-        self.base_velocity_deque = deque()
-
         self.follow_arm_publish_lock = threading.Lock()
         self.follow_arm_publish_lock.acquire()
 
@@ -94,8 +79,8 @@ class RosOperator(Node):
         self.triggered_joys = {}
         self.joy_lock = threading.Lock()
 
-        self.pos_cmd = PosCmd
-        self.joint_control = JointControl
+        # self.pos_cmd = PosCmd
+        # self.joint_control = JointControl
         self.robot_cmd = RobotCmd
         self.robot_status = RobotStatus
 
@@ -137,7 +122,7 @@ class RosOperator(Node):
                 except AttributeError as e:
                     self.get_logger().error(f"Callback not found for key: {key} -> {e}")
 
-        # 机械臂订阅
+        # arm topics
         arm_topics = {
             "feedback_left": ("feedback_left_topic", self.robot_status),
             "feedback_right": ("feedback_right_topic", self.robot_status),
@@ -164,7 +149,7 @@ class RosOperator(Node):
             except AttributeError as e:
                 self.get_logger().error(f"Callback not found for key: {key} -> {e}")
 
-        # 按键订阅
+        # joystick subscription
         self.create_subscription(
             Int32MultiArray,
             self.config["joy_config"]["joy_topic"],
@@ -172,25 +157,7 @@ class RosOperator(Node):
             2,
         )
 
-        # 底盘订阅
-        if self.args.use_base:
-            self.create_subscription(
-                self.pos_cmd,
-                self.config["robot_base_config"]["robot_base_topic"],
-                self.robot_base_callback,
-                2,
-            )
-
-            if self.args.record == "Distance":
-                self.create_subscription(TFMessage, "/tf", self.base_pose_callback, 2)
-            if self.args.record == "Speed":
-                self.create_subscription(
-                    self.pos_cmd,
-                    self.config["robot_base_config"]["robot_base_topic"],
-                    self.base_velocity_callback,
-                    2,
-                )
-        # 推理模式相关发布
+        # inference related publisher
         if not self.in_collect:
             self.controller_arm_left_publisher = self.create_publisher(
                 self.robot_status,
@@ -202,74 +169,27 @@ class RosOperator(Node):
                 self.config["arm_config"]["controller_right_topic"],
                 10,
             )
-            self.base_actuator_publisher = self.create_publisher(
-                self.pos_cmd,
-                self.config["robot_base_config"]["robot_base_cmd_topic"],
-                10,
-            )
 
-    # 推理
+    # inference publish function
     def follow_arm_publish(self, left, right):
-        if len(left) == 7:
-            joint_state_msg = self.robot_status()
+        if len(left) == 7 and len(right) == 7:
+            joint_state_msg_left = self.robot_status()
+            joint_state_msg_right = self.robot_status()
         else:
             print("\033[31mERROR action\033[0m")
 
             return
 
-        joint_state_msg.joint_pos = left.astype(np.float64)
-        self.controller_arm_left_publisher.publish(joint_state_msg)  # /joint_control
+        joint_state_msg_left.joint_pos = left.astype(np.float64)
+        self.controller_arm_left_publisher.publish(
+            joint_state_msg_left
+        )  # /left_joint_control
+
         if len(right) != 0:
-            joint_state_msg.joint_pos = right.astype(np.float64)
+            joint_state_msg_right.joint_pos = right.astype(np.float64)
             self.controller_arm_right_publisher.publish(
-                joint_state_msg
-            )  # /joint_control2
-
-    def init_robot_base_pose(self):
-        if len(self.robot_base_origin) == 0:
-            print(r"there is no base_pose_deque")
-
-            return None
-        base_pose = self.robot_base_origin.pop()
-        tf_info = base_pose.transforms[0].transform
-        base_quaternion = [
-            tf_info.rotation.x,
-            tf_info.rotation.y,
-            tf_info.rotation.z,
-            tf_info.rotation.w,
-        ]
-        r = R.from_quat(base_quaternion)
-        _, _, base_pose_yaw = r.as_euler("xyz", degrees=False)
-        base_pose = [tf_info.translation.x, -tf_info.translation.y, base_pose_yaw]
-        self.robot_base_pose_init = base_pose
-
-        self.robot_base_target = np.zeros((6,))
-
-        return True
-
-    def set_robot_base_target(self, target_base):
-        self.robot_base_target[0] = target_base[0]  # x
-        self.robot_base_target[1] = target_base[1]  # y
-        self.robot_base_target[2] = target_base[2]  # Wz
-        self.robot_base_target[3] = target_base[3]  # height
-        self.robot_base_target[4] = target_base[4]  # head_pitch
-        self.robot_base_target[5] = target_base[5]  # head_yaw
-
-        self.base_velocity_target[0] = target_base[6]  # motor1
-        self.base_velocity_target[1] = target_base[7]  # motor2
-        self.base_velocity_target[2] = target_base[8]  # motor3
-        self.base_velocity_target[3] = target_base[9]  # motor4
-
-    def start_base_control_thread(self):
-        if self.args.use_base:
-            self.init_robot_base_pose()
-            self.base_enable = True
-            self.base_control_thread = threading.Thread(
-                target=self.robot_base_control_thread, args=()
-            )  # 执行指令单独的线程,，可以边说话边执行，多线程操作
-            self.base_control_thread.start()
-
-            return
+                joint_state_msg_right
+            )  # /right_joint_control
 
     def visualize_pid_base(self, states, target, plot_path=None):
         STATE_NAMES = ["DX", "DY", "Yaw"]
@@ -299,126 +219,6 @@ class RosOperator(Node):
 
         plt.close()
 
-    def robot_base_shutdown(self):
-        rate = self.create_rate(self.args.frame_rate)
-
-        shutdown_control = self.pos_cmd()
-        shutdown_control.height = self.robot_base_target[3]
-
-        for mode in [1, 2]:
-            shutdown_control.mode1 = mode
-            self.base_actuator_publisher.publish(shutdown_control)
-
-            rate.sleep()
-
-        self.base_enable = False
-
-        return
-
-    def robot_base_control_thread(self):  # inference init robot arm in qpos
-        rate = self.create_rate(self.args.frame_rate)
-        control = self.pos_cmd()
-        max_velocity = 1.0
-
-        if self.args.record == "Distance":
-            pid_controllers = {
-                "x": PIDController(
-                    kp=10.0, ki=0.0, kd=0.0, max_i=1.0, max_output=max_velocity
-                ),
-                "y": PIDController(
-                    kp=10.0, ki=0.0, kd=0.0, max_i=1.0, max_output=max_velocity
-                ),
-                "z": PIDController(
-                    kp=1.0, ki=0.0, kd=0.0, max_i=1.0, max_output=max_velocity
-                ),
-            }
-
-            recorded_base_poses = []
-            recorded_target_poses = []
-            recorded_control_outputs = []
-            timeout = 0
-
-            while rclpy.ok() and self.base_enable:
-                if len(self.base_pose_deque) == 0:
-                    print("\033[33mThere is no base_pose_deque\033[0m")
-
-                    timeout += 1
-                    if timeout > 100:
-                        self.base_enable = False
-                        break
-                    rate.sleep()
-
-                    continue
-
-                base_pose = self.base_pose_deque.pop()
-                current_x, current_y, current_Wz = base_pose
-                (
-                    target_x,
-                    target_y,
-                    target_Wz,
-                    target_height,
-                    target_pitch,
-                    target_yaw,
-                ) = self.robot_base_target
-
-                # 更新控制命令
-                control.chx = pid_controllers["x"].update(current_x, target_x, dt=0.017)
-                control.chy = pid_controllers["y"].update(current_y, target_y, dt=0.017)
-                control.chz = pid_controllers["z"].update(
-                    current_Wz, target_Wz, dt=0.017
-                )
-                control.height = target_height
-                control.head_pit = target_pitch
-                control.head_yaw = target_yaw
-                control.mode1 = 1
-
-                # 记录数据
-                # target_pose = [target_x, target_y, current_Wz]
-                output_control = [control.chx, control.chy, control.chz]
-
-                # recorded_base_poses.append(base_pose)
-                # recorded_target_poses.append(target_pose)
-                recorded_control_outputs.append(output_control)
-
-                self.base_actuator_publisher.publish(control)
-                rate.sleep()
-
-            if not self.base_enable:
-                self.robot_base_shutdown()
-
-                plot_path = (
-                    os.path.join(self.args.ckpt_dir, f"{self.args.ckpt_name}_PID.png")
-                    if self.args.episode_path == "./datasets"
-                    else os.path.join(f"{self.args.episode_path}_PID.png")
-                )
-                self.visualize_pid_base(
-                    recorded_base_poses, recorded_target_poses, plot_path=plot_path
-                )
-        if self.args.record == "Speed":
-            while rclpy.ok() and self.base_enable:
-                _, _, _, target_height, target_pitch, target_yaw = (
-                    self.robot_base_target
-                )
-                target_motor1, target_motor2, target_motor3, target_motor4 = (
-                    self.base_velocity_target
-                )
-
-                control.height = target_height
-                control.head_pit = target_pitch
-                control.head_yaw = target_yaw
-                control.temp_float_data[1:5] = [
-                    target_motor1,
-                    target_motor2,
-                    target_motor3,
-                    target_motor4,
-                ]
-                control.mode1 = 3
-
-                self.base_actuator_publisher.publish(control)
-                rate.sleep()
-
-        return
-
     def follow_arm_publish_continuous(
         self, left_target, right_target, arm_steps_length=None, max_steps=1000
     ):
@@ -432,9 +232,9 @@ class RosOperator(Node):
             max_steps: 最大步数，防止无限循环
         """
         if arm_steps_length is None:
-            arm_steps_length = [0.01, 0.01, 0.005, 0.01, 0.01, 0.01, 0.04]
+            arm_steps_length = [0.01, 0.01, 0.005, 0.01, 0.01, 0.01, 0.02]
 
-        # 验证输入
+        # check data dim
         if len(left_target) != 7 or len(right_target) != 7:
             self.get_logger().error(
                 f"Invalid joint length: left={len(left_target)}, right={len(right_target)}"
@@ -449,11 +249,7 @@ class RosOperator(Node):
         right_arm = None
         rate = self.create_rate(self.args.frame_rate)
 
-        # 等待获取当前机械臂位置，添加超时机制
-        timeout_count = 0
-        max_timeout = 100  # 约1.7秒超时
-
-        while rclpy.ok() and timeout_count < max_timeout:
+        while rclpy.ok():
             if len(self.feedback_left_arm_deque) != 0:
                 left_arm = list(self.feedback_left_arm_deque[-1].joint_pos)
 
@@ -463,69 +259,50 @@ class RosOperator(Node):
             if left_arm is not None and right_arm is not None:
                 break
 
-            timeout_count += 1
-            rate.sleep()
-
-        if left_arm is None or right_arm is None:
-            self.get_logger().error(
-                "Failed to get current arm positions within timeout"
-            )
-            return False
-
-        # 计算方向标志位
+        # direction flags
         left_symbol = np.sign(np.array(left_target) - np.array(left_arm))
         right_symbol = np.sign(np.array(right_target) - np.array(right_arm))
 
-        # 预创建消息对象，避免重复创建
+        # init ros2 message
         left_joint_state_msg = self.robot_status()
         right_joint_state_msg = self.robot_status()
 
-        # 检查锁状态，如果无法获取锁则直接返回
-        if not self.follow_arm_publish_lock.acquire(False):
-            self.get_logger().warn("Cannot acquire lock, another operation in progress")
-            return False
+        step = 0
+        while rclpy.ok() and step < max_steps:
+            left_done = self._update_arm_position(
+                left_target, left_arm, left_symbol, arm_steps_length
+            )
+            right_done = self._update_arm_position(
+                right_target, right_arm, right_symbol, arm_steps_length
+            )
 
-        try:
-            step = 0
-            while rclpy.ok() and step < max_steps:
-                left_done = self._update_arm_position(
-                    left_target, left_arm, left_symbol, arm_steps_length
-                )
-                right_done = self._update_arm_position(
-                    right_target, right_arm, right_symbol, arm_steps_length
-                )
+            # check if reach dest
+            if left_done >= len(left_target) and right_done >= len(right_target):
+                self.get_logger().info(f"Reached target positions in {step} steps")
+                break
 
-                # 检查是否到达目标位置
-                if left_done >= len(left_target) and right_done >= len(right_target):
-                    self.get_logger().info(f"Reached target positions in {step} steps")
-                    break
+            # update message
+            left_joint_state_msg.joint_pos = np.asarray(left_arm, dtype=np.float64)
+            right_joint_state_msg.joint_pos = np.asarray(right_arm, dtype=np.float64)
 
-                # 更新消息内容
-                left_joint_state_msg.joint_pos = np.asarray(left_arm, dtype=np.float64)
-                right_joint_state_msg.joint_pos = np.asarray(
-                    right_arm, dtype=np.float64
-                )
+            # publish control message
+            self.controller_arm_left_publisher.publish(left_joint_state_msg)
+            self.controller_arm_right_publisher.publish(right_joint_state_msg)
 
-                # 发布控制命令
-                self.controller_arm_left_publisher.publish(left_joint_state_msg)
-                self.controller_arm_right_publisher.publish(right_joint_state_msg)
+            step += 1
 
-                step += 1
-
-                # 减少调试信息输出频率
-                if step % 50 == 0:
-                    self.get_logger().info(f"Arm movement progress: step {step}")
-
-                rate.sleep()
-
-            if step >= max_steps:
-                self.get_logger().warn(
-                    f"Reached maximum steps ({max_steps}), movement may be incomplete"
+            # print debug info
+            if step % 20 == 0:
+                self.get_logger().info(
+                    f"Step {step} - Left joints: {[f'{x:.3f}' for x in left_arm]}, Right joints: {[f'{x:.3f}' for x in right_arm]}"
                 )
 
-        finally:
-            # 确保释放锁
-            self.follow_arm_publish_lock.release()
+            rate.sleep()
+
+        if step >= max_steps:
+            self.get_logger().warn(
+                f"Reached maximum steps ({max_steps}), movement may be incomplete"
+            )
 
         return True
 
@@ -548,7 +325,7 @@ class RosOperator(Node):
             "right_arm": self.robot_status(),
         }
 
-        # 获取图像信息
+        # get image data
         for cam_name in self.args.camera_names:
             if cam_name in img_data:
                 deque_map = {
@@ -562,7 +339,7 @@ class RosOperator(Node):
 
                     return None
 
-                # 是否压缩处理图像
+                # image process
                 img_data[cam_name] = self.bridge.compressed_imgmsg_to_cv2(
                     deque_map[cam_name].pop(), "passthrough"
                 )
@@ -586,7 +363,7 @@ class RosOperator(Node):
                         deque_map[key].pop(), "passthrough"
                     )
 
-        # 获取机械臂状态
+        # get robot arm states
         for arm_name in ["left_arm", "right_arm"]:
             deque_map = {
                 "left_arm": self.feedback_left_arm_deque,
@@ -600,9 +377,9 @@ class RosOperator(Node):
 
             arm_data[arm_name] = deque_map[arm_name].pop()
 
-        obs_dict = collections.OrderedDict()  # 有序的字典
+        obs_dict = collections.OrderedDict()  # orderedDict
 
-        # 保存图像
+        # save images
         obs_dict["images"] = {
             cam: img for cam, img in img_data.items() if cam in self.args.camera_names
         }
@@ -614,7 +391,7 @@ class RosOperator(Node):
                 if cam in self.args.camera_names
             }
 
-        # 保存机械臂状态
+        # save arm states
         left_eef = np.concatenate(
             [
                 arm_data["left_arm"].end_pos,
@@ -649,59 +426,6 @@ class RosOperator(Node):
             axis=0,
         )
 
-        # 保存底盘状态
-        if self.args.use_base and ts != 0:
-            if len(self.robot_base_deque) == 0:
-                print(r"there is no robot_base_deque, maby there is no VR message")
-
-                return None
-
-            if self.args.record == "Distance":
-                if len(self.base_pose_deque) == 0:
-                    print(r"there is no base_pose_deque")
-
-                    return None
-            if self.args.record == "Speed":
-                if len(self.base_velocity_deque) == 0:
-                    print(r"there is no base_velocity_deque")
-
-                    return None
-
-            robot_base = self.robot_base_deque.pop()
-
-            if self.args.record == "Distance":
-                base_pose = self.base_pose_deque.pop()
-                obs_dict["robot_base"] = [
-                    base_pose[0],
-                    base_pose[1],
-                    base_pose[2],
-                    robot_base.height,
-                    robot_base.head_pit,
-                    robot_base.head_yaw,
-                ]
-
-                obs_dict["base_velocity"] = np.zeros((4,))
-            if self.args.record == "Speed":
-                obs_dict["robot_base"] = [
-                    0,
-                    0,
-                    0,
-                    robot_base.height,
-                    robot_base.head_pit,
-                    robot_base.head_yaw,
-                ]
-
-                base_velocity = self.base_velocity_deque.pop()
-                obs_dict["base_velocity"] = [
-                    base_velocity[0],
-                    base_velocity[1],
-                    base_velocity[2],
-                    base_velocity[3],
-                ]
-        else:
-            obs_dict["robot_base"] = np.zeros((6,))
-            obs_dict["base_velocity"] = np.zeros((4,))
-
         return obs_dict
 
     def get_action(self):
@@ -720,7 +444,7 @@ class RosOperator(Node):
 
                 return None
 
-        # 获取主臂状态
+        # get arm frame
         left_frame = deque_map["control_left_arm_deque"].pop()
         right_frame = deque_map["control_right_arm_deque"].pop()
 
@@ -729,7 +453,7 @@ class RosOperator(Node):
         control_left_arm_gripper = left_frame.joint_pos[-1]
         control_right_arm_gripper = right_frame.joint_pos[-1]
 
-        # 主臂保存状态
+        # concat arm eef pos
         control_left_arm_eef = np.concatenate(
             [control_left_arm, [control_left_arm_gripper]]
         )
@@ -737,13 +461,12 @@ class RosOperator(Node):
             [control_right_arm, [control_right_arm_gripper]]
         )
 
-        # 构建动作字典
+        # create action dict
         action_dict["action"] = np.zeros((joints_dim * 2,))
         action_dict["action_qvel"] = np.zeros((joints_dim * 2,))
         action_dict["action_eef"] = np.concatenate(
             (control_left_arm_eef, control_right_arm_eef), axis=0
         )
-        action_dict["action_base"] = np.zeros((13,))  # waiting for the obersevation
 
         return action_dict
 
@@ -798,45 +521,6 @@ class RosOperator(Node):
         if len(self.feedback_right_arm_deque) >= 2000:
             self.feedback_right_arm_deque.popleft()
         self.feedback_right_arm_deque.append(msg)
-
-    # robot robot_base
-    def robot_base_callback(self, msg):
-        if len(self.robot_base_deque) >= 2:
-            self.robot_base_deque.popleft()
-        self.robot_base_deque.append(msg)
-
-    def base_pose_callback(self, msg):
-        if len(self.base_pose_deque) >= 2:
-            self.base_pose_deque.popleft()
-
-        if len(self.robot_base_origin) >= 2:
-            self.robot_base_origin.popleft()
-        self.robot_base_origin.append(msg)
-
-        tf_info = msg.transforms[0].transform
-        base_quaternion = [
-            tf_info.rotation.x,
-            tf_info.rotation.y,
-            tf_info.rotation.z,
-            tf_info.rotation.w,
-        ]
-        r = R.from_quat(base_quaternion)
-        _, _, base_pose_yaw = r.as_euler("xyz", degrees=False)
-        base_pose = [tf_info.translation.x, -tf_info.translation.y, base_pose_yaw]
-
-        base_pose[0] = base_pose[0] - self.robot_base_pose_init[0]  # 如果这个值是负的
-        base_pose[1] = base_pose[1] - self.robot_base_pose_init[1]
-        base_pose[2] = base_pose[2] - self.robot_base_pose_init[2]
-
-        self.base_pose_deque.append(base_pose)
-
-    def base_velocity_callback(self, msg):
-        if len(self.base_velocity_deque) >= 2:
-            self.base_velocity_deque.popleft()
-
-        velocity = msg.temp_float_data[1:5]
-
-        self.base_velocity_deque.append(velocity)
 
     def joy_callback(self, msg):
         joy = list(msg.data)

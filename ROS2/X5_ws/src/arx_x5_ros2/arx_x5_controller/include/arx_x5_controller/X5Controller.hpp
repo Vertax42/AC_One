@@ -18,6 +18,10 @@ namespace arx::x5 {
 class X5Controller : public rclcpp::Node {
 public:
   X5Controller();
+  ~X5Controller() {
+    Cleanup();
+  }
+  
   void Cleanup() {
     RCLCPP_INFO(this->get_logger(), "Robot is shutting down...");
     SetRobotState(InterfacesThread::state::PROTECT);

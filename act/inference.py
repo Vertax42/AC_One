@@ -129,7 +129,6 @@ def get_model_config(args):
         "position_embedding": args.position_embedding,
         "masks": args.masks,
         "dilation": args.dilation,
-        "use_base": args.use_base,
         "use_depth_image": args.use_depth_image,
     }
 
@@ -150,17 +149,15 @@ def get_model_config(args):
             "use_eef_states": args.use_eef_states,
         }
 
-        # 更新 states_dim
+        # update states_dim
         policy_config["states_dim"] += (
             policy_config["action_dim"] if args.use_qvel else 0
         )
         policy_config["states_dim"] += 1 if args.use_effort else 0
         policy_config["states_dim"] *= 2
 
-        # 更新 action_dim
+        # update action_dim
         policy_config["action_dim"] *= 2  # 双臂预测
-        policy_config["action_dim"] += 10 if args.use_base else 0
-        # 不再需要额外的*2，因为add_action_output=False
 
         action_dim = policy_config["action_dim"]
         states_dim = policy_config["states_dim"]
@@ -239,10 +236,16 @@ def get_depth_image(observation, camera_names):
 
 
 def apply_gripper_gate(action_value, gate):
-    min_gripper = -0.07
-    # max_gripper = -2.8
+    """
+    夹爪门控函数
+    - action_value: 模型预测的夹爪动作值 (0-1范围)
+    - gate: 阈值 (基于数据分析建议: 0.5)
+    - 返回: 0.2 (关闭) 或 1.0 (打开) - 与数据集保持一致
+    """
+    min_gripper = 0.2  # 关闭夹爪 - 与数据集保持一致
+    max_gripper = 1.0  # 打开夹爪
 
-    return action_value if action_value < gate else min_gripper
+    return min_gripper if action_value < gate else max_gripper
 
 
 def get_obervations(args, timestep, ros_operator):
@@ -260,31 +263,23 @@ def get_obervations(args, timestep, ros_operator):
         return obs_dict
 
 
-def init_robot(ros_operator, use_base, connected_event, start_event):
+def init_robot(ros_operator, connected_event, start_event):
     init0 = [0.0, 0.0, 0.0, -0.0, 0.0, 0.0, 1]  # open gripper
     init1 = [0.0, 0.0, 0.0, -0.0, 0.0, 0.0, 0.0]  # close gripper
 
     # 发布初始位置（关节空间姿态）
-    ros_operator.follow_arm_publish_continuous(init0, init0)
-    # ros_operator.robot_base_shutdown()
+    print("Initializing robot - opening gripper...")
+    success = ros_operator.follow_arm_publish_continuous(init0, init0)
+    if not success:
+        print("Warning: Failed to open gripper, continuing anyway...")
 
     connected_event.set()
     start_event.wait()
 
-    ros_operator.follow_arm_publish_continuous(init1, init1)
-    if use_base:
-        ros_operator.start_base_control_thread()
-
-
-def signal_handler(signal, frame, ros_operator):
-    print("Caught Ctrl+C / SIGINT signal")
-
-    # 底盘给零
-    ros_operator.base_enable = False
-    ros_operator.robot_base_shutdown()
-    ros_operator.base_control_thread.join()
-
-    sys.exit(0)
+    print("Initializing robot - closing gripper...")
+    success = ros_operator.follow_arm_publish_continuous(init1, init1)
+    if not success:
+        print("Warning: Failed to close gripper, continuing anyway...")
 
 
 def cleanup_shm(names):
@@ -331,10 +326,7 @@ def ros_process(
             pass
         return
 
-    if args.use_base:
-        signal.signal(signal.SIGINT, partial(signal_handler, ros_operator=ros_operator))
-
-    init_robot(ros_operator, args.use_base, connected_event, start_event)
+    init_robot(ros_operator, connected_event, start_event)
 
     rate = Rate(args.frame_rate)
     while rclpy.ok():
@@ -404,7 +396,6 @@ def ros_process(
                 )
 
             ros_operator.follow_arm_publish(left_action, right_action)
-            print(f"{left_action=}", f"{right_action=}", left_action, right_action)
             if args.use_base:
                 action_base = action[gripper_idx[1] + 1 : gripper_idx[1] + 1 + 10]
                 ros_operator.set_robot_base_target(action_base)
@@ -514,10 +505,7 @@ def inference_process(args, config, shm_dict, shapes, ros_proc):
     )
 
     def post_process(a):
-        # 使用states的统计信息进行反归一化，因为模型训练时使用的是states归一化
-        # a是14维：前7维是左臂，后7维是右臂
-        # left_states和right_states统计信息完全相同，直接使用left_states
-        processed_action = a * stats["left_states_std"] + stats["left_states_mean"]
+        processed_action = a * stats["action_std"] + stats["action_mean"]
 
         return processed_action
 
@@ -539,15 +527,22 @@ def inference_process(args, config, shm_dict, shapes, ros_proc):
             f"📊 temporal_agg模式内存需求: {max_publish_step * (max_publish_step + chunk_size) * action_dim * 8 / (1024**3):.2f} GB"
         )
 
-        all_time_actions = np.zeros(
-            (max_publish_step, max_publish_step + chunk_size, action_dim)
+        all_time_actions = torch.zeros(
+            (max_publish_step, max_publish_step + chunk_size, action_dim), device=device
         )
         print("✅ 动作历史数组已创建")
 
     timestep = 0
+    rate = Rate(args.frame_rate)  # 添加频率控制
+
+    # 添加性能监控
+    import time
+
+    start_time = time.time()
 
     with torch.inference_mode():
         while timestep < args.max_publish_step and ros_proc.is_alive():
+            step_start_time = time.time()
             obs_dict = {
                 "images": {},
                 "qpos": None,
@@ -668,21 +663,32 @@ def inference_process(args, config, shm_dict, shapes, ros_proc):
 
                 if config["temporal_agg"]:
                     all_time_actions[[timestep], timestep : timestep + chunk_size] = (
-                        all_actions.cpu().numpy()
+                        all_actions
                     )
 
                     actions_for_curr_step = all_time_actions[
                         :, timestep
                     ]  # (10000,1,14) => (10000, 14)
-                    actions_populated = np.all(actions_for_curr_step != 0, axis=1)
+                    actions_populated = torch.all(actions_for_curr_step != 0, axis=1)
                     actions_for_curr_step = actions_for_curr_step[actions_populated]
 
-                    k = 0.01
-                    exp_weights = np.exp(-k * np.arange(len(actions_for_curr_step)))
+                    # 限制有效预测数量，避免权重过度分散
+                    max_predictions = args.max_predictions  # 使用命令行参数
+                    if len(actions_for_curr_step) > max_predictions:
+                        actions_for_curr_step = actions_for_curr_step[-max_predictions:]
+
+                    k = 0.1
+                    exp_weights = torch.exp(
+                        -k
+                        * torch.arange(
+                            len(actions_for_curr_step),
+                            device=actions_for_curr_step.device,
+                        )
+                    )
                     exp_weights = exp_weights / exp_weights.sum()
-                    exp_weights = exp_weights[:, np.newaxis]
+                    exp_weights = exp_weights.unsqueeze(dim=1)
                     raw_action = (actions_for_curr_step * exp_weights).sum(
-                        axis=0, keepdims=True
+                        dim=0, keepdim=True
                     )
                 else:
                     if args.pos_lookahead_step != 0:
@@ -694,20 +700,41 @@ def inference_process(args, config, shm_dict, shapes, ros_proc):
             else:
                 raise NotImplementedError
 
-            action = post_process(raw_action[0])
+            # 确保张量在CPU上，以便与numpy数组进行运算
+            if isinstance(raw_action, torch.Tensor):
+                raw_action_cpu = raw_action.cpu().numpy()
+            else:
+                raw_action_cpu = raw_action
+            action = post_process(raw_action_cpu[0])
 
-            # 调试信息：查看夹爪值
-            print(
-                f"模型原始输出夹爪 - 左臂: {raw_action[0][6]:.6f}, 右臂: {raw_action[0][13]:.6f}"
-            )
-            print(f"归一化后夹爪 - 左臂: {action[6]:.6f}, 右臂: {action[13]:.6f}")
-            print(
-                f"夹爪统计 - 均值: {stats['action_mean'][6]:.6f}, 标准差: {stats['action_std'][6]:.6f}"
-            )
+            # 性能分析和调试信息
+            if timestep % 20 == 0:
+                current_time = time.time()
+                elapsed_time = current_time - start_time
+                actual_fps = timestep / elapsed_time if elapsed_time > 0 else 0
+                step_time = current_time - step_start_time
+
+                # 分析夹爪动作
+                gripper_idx = [6, 13]
+                left_gripper = action[gripper_idx[0]]
+                right_gripper = action[gripper_idx[1]]
+
+                print(f"Step {timestep} - Action: {[f'{x:.3f}' for x in action]}")
+                print(f"  实际频率: {actual_fps:.1f} Hz (目标: {args.frame_rate} Hz)")
+                print(
+                    f"  单步耗时: {step_time*1000:.1f} ms (目标: {1000/args.frame_rate:.1f} ms)"
+                )
+                print(f"  夹爪动作: 左臂={left_gripper:.3f}, 右臂={right_gripper:.3f}")
+
+                # 性能警告
+                if actual_fps < args.frame_rate * 0.8:  # 低于80%目标频率
+                    print(f"  ⚠️  性能警告: 推理频率过低，可能影响控制效果")
+                    print(f"  💡 建议: 检查GPU使用率、模型复杂度或降低图像分辨率")
 
             robot_action(action, shm_dict)
 
             timestep += 1
+            # rate.sleep()  # 添加频率控制
 
         if args.use_base:
             action[16] = 0
@@ -721,7 +748,7 @@ def parse_args(known=False):
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        "--max_publish_step", type=int, default=3600, help="max publish step"
+        "--max_publish_step", type=int, default=10000, help="max publish step"
     )
     # 数据集和检查点设置
     parser.add_argument(
@@ -889,7 +916,16 @@ def parse_args(known=False):
     )
 
     parser.add_argument(
-        "--gripper_gate", type=float, default=-1, help="gripper gate threshold"
+        "--gripper_gate",
+        type=float,
+        default=-1,
+        help="gripper gate threshold (based on data analysis)",
+    )
+    parser.add_argument(
+        "--max_predictions",
+        type=int,
+        default=50,
+        help="maximum number of predictions for temporal aggregation",
     )
 
     return parser.parse_known_args()[0] if known else parser.parse_args()

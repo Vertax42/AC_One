@@ -54,11 +54,16 @@ SmoothJointInterpolator::SmoothJointInterpolator(
 ) : controller_(controller), logger_(logger), control_dt_(control_dt), print_interval_(print_interval), is_interpolating_(false) {
 }
 
+SmoothJointInterpolator::~SmoothJointInterpolator() {
+    // Nothing to do for synchronous version
+}
+
 bool SmoothJointInterpolator::interpolate(
     const std::vector<double>& target_poses,
     double duration,
     double gripper_target,
-    std::function<double(double)> interpolation_func
+    std::function<double(double)> interpolation_func,
+    rclcpp::Node* node
 ) {
     // Controller reference is always valid (passed by reference)
 
@@ -155,6 +160,14 @@ bool SmoothJointInterpolator::interpolate(
             RCLCPP_DEBUG(logger_, "Step %d: target=[%.3f, %.3f, %.3f]", i, current_poses[0], current_poses[1], current_poses[2]);
         }
 
+        // Publish current state to keep arm_slave topic updated during interpolation
+        if (controller_) {
+            auto* controller = static_cast<arx::x5::X5Controller*>(controller_.get());
+            if (controller) {
+                controller->PubState();
+            }
+        }
+
         // Wait for control period
         std::this_thread::sleep_for(std::chrono::duration<double>(control_dt_));
     }
@@ -180,9 +193,6 @@ bool SmoothJointInterpolator::isInterpolating() const {
     return is_interpolating_;
 }
 
-void SmoothJointInterpolator::stopInterpolation() {
-    is_interpolating_ = false;
-}
 
 bool SmoothJointInterpolator::getCurrentJointState(std::vector<double>& poses, double& gripper_pos) {
     try {
@@ -261,5 +271,7 @@ bool SmoothJointInterpolator::setJointCommand(const std::vector<double>& poses, 
     
     return false;
 }
+
+
 
 }  // namespace arx::x5::utils

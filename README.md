@@ -13,7 +13,7 @@ sudo apt install -y ros-$ROS_DISTRO-diagnostic-updater or
 mamba install -y ros-$ROS_DISTRO-diagnostic-updater
 
 sudo apt install -y ros-$ROS_DISTRO-image-transport-plugins or
-mamba install -y ros-$ROS_DISTRO-iamge-transport-plugins
+mamba install -y ros-$ROS_DISTRO-image-transport-plugins
 
 cd realsense
 colcon build
@@ -56,3 +56,9 @@ grep "PYTHON_EXECUTABLE" ./build/*/CMakeCache.txt
 # pyttsx3 dependency problem
 sudo cp -rf /usr/share/alse ~/miniconda3/envs/ros_openpi/share
 sudo cp -rf /usr/lib/x86_64-linux-gnu/alsa-lib ~/miniconda3/envs/ros_openpi/lib
+
+# replay
+eval "$(mamba shell hook --shell bash)" && mamba activate ros_openpi && python replay.py --episode_path datasets/episode_0.hdf5 --frame_rate 60
+
+# eval
+cd /home/Xense/AC_One/act && conda activate act && python eval.py --data data/config.yaml --ckpt_dir weights --dataset_path datasets/episode_0.hdf5 --camera_names head left_wrist right_wrist --policy_class ACT --chunk_size 50 --hidden_dim 512 --dim_feedforward 3200 --kl_weight 10 --lr 1e-5

@@ -131,8 +131,8 @@ def robot_action(ros_operator, args, action, action_base, actions_velocity):
 
 
 def init_robot(ros_operator, use_base):
-    init0 = [0.0, 0.948, 0.858, -0.573, 0.0, 0.0, -2.8]
-    init1 = [0.0, 0.948, 0.858, -0.573, 0.0, 0.0, 0.0]
+    init0 = [0.0, 0.00, 0.0, -0.0, 0.0, 0.0, 1.0]
+    init1 = [0.0, 0.0, 0.0, -0.0, 0.0, 0.0, 0.0]
 
     ros_operator.follow_arm_publish_continuous(init0, init0)
     ros_operator.robot_base_shutdown()
@@ -181,7 +181,13 @@ def main(args):
     rate = Rate(args.frame_rate)
     for idx in range(len(replay_actions)):
         print(f"{replay_actions=}")
-        robot_action(ros_operator, args, replay_actions[idx], action_base[idx], idx)
+        robot_action(
+            ros_operator,
+            args,
+            replay_actions[idx],
+            action_base[idx],
+            actions_velocity[idx],
+        )
         rate.sleep()
 
     ros_operator.base_enable = False
