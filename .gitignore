@@ -1,15 +1,6 @@
 ### VisualStudioCode template
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
-!.vscode/*.code-snippets
-
-# Local History for Visual Studio Code
+.vscode/
 .history/
-
-# Built Visual Studio Code Extensions
 *.vsix
 
 ### JetBrains template
@@ -106,9 +97,24 @@ _deps
 CMakeUserPresets.json
 
 ### ROS2 template
+# ROS2 build artifacts - workspace level
+**/install/
+**/build/
+**/log/
+
+# ROS2 build artifacts - specific paths
 realsense/install/
-log/
-build/
+realsense/build/
+realsense/log/
+ROS2/install/
+ROS2/log/
+ROS2/build/
+ROS2/X5_ws/install/
+ROS2/X5_ws/log/
+ROS2/X5_ws/build/
+arx_joy/install/
+arx_joy/build/
+arx_joy/log/
 
 # Ignore generated docs
 *.dox
@@ -136,6 +142,45 @@ qtcreator-*
 COLCON_IGNORE
 AMENT_IGNORE
 
+### Python template
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
 **/datasets
 **/weights
 **/test
+
+# PDF files
+*.pdf

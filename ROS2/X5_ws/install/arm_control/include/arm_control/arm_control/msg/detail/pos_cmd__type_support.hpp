@@ -1,1 +1,0 @@
-/home/vertax/AC_One/ROS2/X5_ws/build/arm_control/rosidl_generator_cpp/arm_control/msg/detail/pos_cmd__type_support.hpp

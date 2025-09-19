@@ -1,1 +1,0 @@
-/home/vertax/AC_One/ROS2/X5_ws/build/arx5_arm_msg/ament_cmake_core/arx5_arm_msgConfig-version.cmake

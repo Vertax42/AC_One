@@ -1,1 +1,0 @@
-/home/vertax/anaconda3/envs/ros_openpi/share/ament_cmake_core/cmake/environment_hooks/environment/path.sh

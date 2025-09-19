@@ -1,1 +1,0 @@
-/home/vertax/AC_One/ROS2/X5_ws/src/pico_xr_teleop/launch/pico_xr_teleop.launch.py

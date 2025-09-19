@@ -1,1 +1,0 @@
-/home/vertax/AC_One/ROS2/X5_ws/build/arm_control/rosidl_typesupport_introspection_c/arm_control/msg/rosidl_typesupport_introspection_c__visibility_control.h

@@ -1,1 +1,0 @@
-/home/vertax/AC_One/ROS2/X5_ws/build/arx_x5_controller/ament_cmake_core/arx_x5_controllerConfig.cmake

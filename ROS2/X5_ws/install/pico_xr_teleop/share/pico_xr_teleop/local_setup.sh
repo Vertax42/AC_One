@@ -1,1 +1,0 @@
-/home/vertax/AC_One/ROS2/X5_ws/build/pico_xr_teleop/ament_cmake_environment_hooks/local_setup.sh

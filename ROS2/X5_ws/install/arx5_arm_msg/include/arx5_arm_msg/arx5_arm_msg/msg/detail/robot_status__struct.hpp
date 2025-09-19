@@ -1,1 +1,0 @@
-/home/vertax/AC_One/ROS2/X5_ws/build/arx5_arm_msg/rosidl_generator_cpp/arx5_arm_msg/msg/detail/robot_status__struct.hpp
