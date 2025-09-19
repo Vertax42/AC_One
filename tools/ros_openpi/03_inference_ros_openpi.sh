@@ -41,17 +41,22 @@ cleanup_terminals() {
     pkill -f "inference.py" 2>/dev/null || true
     sleep 1
 
-    # 2. 关闭终端窗口
-    local titles=("inference" "lift" "can1" "can3" "can6" "joy" "realsense")
+    # 2. 关闭终端窗口 - 只关闭脚本启动的特定窗口
+    local titles=("inference" "ac_one" "can1" "can3" "can6" "joy" "realsense")
     for title in "${titles[@]}"; do
         log_info "关闭终端窗口: $title"
         if command -v wmctrl &> /dev/null; then
-            # 获取窗口ID并检查是否存在
-            local window_ids=$(wmctrl -l 2>/dev/null | grep "$title" | awk '{print $1}')
+            # 更精确地匹配窗口标题，避免误关闭Cursor终端
+            # 只匹配gnome-terminal启动的窗口，排除Cursor等IDE的终端
+            local window_ids=$(wmctrl -l 2>/dev/null | grep -E "gnome-terminal.*$title" | grep -v -E "Cursor|Code|VSCode" | awk '{print $1}')
             if [ -n "$window_ids" ]; then
                 echo "$window_ids" | while read -r window_id; do
                     if [ -n "$window_id" ]; then
-                        wmctrl -i -c "$window_id" 2>/dev/null || true
+                        # 检查窗口是否仍然存在
+                        if wmctrl -l 2>/dev/null | grep -q "^$window_id "; then
+                            wmctrl -i -c "$window_id" 2>/dev/null || true
+                            log_info "  已关闭窗口: $window_id"
+                        fi
                     fi
                 done
             else
@@ -76,6 +81,30 @@ manual_cleanup() {
     log_info "执行手动清理..."
     cleanup_terminals
     log_info "手动清理完成"
+}
+
+# 安全清理函数 - 只清理进程，不关闭终端窗口
+safe_cleanup() {
+    log_info "执行安全清理（只清理进程，保留终端窗口）..."
+    
+    # 1. 关闭推理进程
+    log_info "关闭推理进程..."
+    pkill -f "inference.py" 2>/dev/null || true
+    sleep 1
+    
+    # 2. 关闭ROS2相关进程
+    log_info "关闭ROS2相关进程..."
+    pkill -f "arx_x5_controller" 2>/dev/null || true
+    pkill -f "arx_joy" 2>/dev/null || true
+    pkill -f "realsense" 2>/dev/null || true
+    sleep 1
+    
+    # 3. 关闭CAN相关进程
+    log_info "关闭CAN相关进程..."
+    pkill -f "arx_can" 2>/dev/null || true
+    pkill -f "can1\|can3\|can6" 2>/dev/null || true
+    
+    log_info "安全清理完成，终端窗口保留"
 }
 
 # 检查CAN接口是否就绪
@@ -172,6 +201,9 @@ main() {
     if [ "$1" = "--cleanup" ] || [ "$1" = "-c" ]; then
         manual_cleanup
         exit 0
+    elif [ "$1" = "--safe-cleanup" ] || [ "$1" = "-s" ]; then
+        safe_cleanup
+        exit 0
     fi
     
     log_info "开始启动推理系统 (ros_openpi环境)..."
@@ -202,7 +234,7 @@ main() {
 
     # 启动ROS2系统 (使用关节控制)
     log_step "启动ROS2机械臂控制器 (关节控制模式)..."
-    gnome-terminal --title="lift" -x $shell_type -i -c "
+    gnome-terminal --title="ac_one" -x $shell_type -i -c "
         eval \"\$(mamba shell hook --shell bash)\";
         mamba activate ros_openpi;
         cd ${workspace}/../../ROS2/X5_ws;
@@ -308,17 +340,17 @@ main() {
     log_info "4. 按 Ctrl+C 退出推理系统"
     log_info ""
     log_info "清理说明："
-    log_info "  - 按 Enter 键将退出脚本并清理所有终端"
-    log_info "  - 如需单独清理所有终端，请运行: $0 --cleanup"
-    log_info "  - 或使用: $0 -c"
+    log_info "  - 按 Enter 键将退出脚本并清理进程（保留终端窗口）"
+    log_info "  - 如需清理所有终端，请运行: $0 --cleanup 或 $0 -c"
+    log_info "  - 如需只清理进程，请运行: $0 --safe-cleanup 或 $0 -s"
     
     # 保持脚本运行，等待用户输入
     log_info ""
-    log_info "按 Enter 键退出脚本并清理所有终端..."
+    log_info "按 Enter 键退出脚本并清理进程..."
     read -r
-    log_info "开始清理所有终端..."
-    cleanup_terminals
-    log_info "脚本退出，所有终端已清理"
+    log_info "开始安全清理进程..."
+    safe_cleanup
+    log_info "脚本退出，进程已清理，终端窗口保留"
 }
 
 # 错误处理 - 移除严格模式

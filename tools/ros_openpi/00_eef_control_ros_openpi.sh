@@ -39,17 +39,21 @@ cleanup_terminals() {
     pkill -f "arx_joy" 2>/dev/null || true
     sleep 1
 
-    # 2. 关闭终端窗口
+    # 2. 关闭终端窗口 - 只关闭脚本启动的特定窗口
     local titles=("ac_one" "can1" "can3" "can6" "joy")
     for title in "${titles[@]}"; do
         log_info "关闭终端窗口: $title"
         if command -v wmctrl &> /dev/null; then
-            # 获取窗口ID并检查是否存在
-            local window_ids=$(wmctrl -l 2>/dev/null | grep "$title" | awk '{print $1}')
+            # 更精确地匹配窗口标题，避免误关闭Cursor终端
+            local window_ids=$(wmctrl -l 2>/dev/null | grep -E "gnome-terminal.*$title|Terminal.*$title" | awk '{print $1}')
             if [ -n "$window_ids" ]; then
                 echo "$window_ids" | while read -r window_id; do
                     if [ -n "$window_id" ]; then
-                        wmctrl -i -c "$window_id" 2>/dev/null || true
+                        # 检查窗口是否仍然存在
+                        if wmctrl -l 2>/dev/null | grep -q "^$window_id "; then
+                            wmctrl -i -c "$window_id" 2>/dev/null || true
+                            log_info "  已关闭窗口: $window_id"
+                        fi
                     fi
                 done
             else

@@ -42,17 +42,21 @@ cleanup_terminals() {
     log_info "等待数据采集进程完成数据保存..."
     sleep 2  # 给collect.py足够时间保存数据
     
-    # 2. 关闭终端窗口
-    local titles=("collect" "can1" "can3" "can6" "lift" "joy" "realsense")
+    # 2. 关闭终端窗口 - 只关闭脚本启动的特定窗口
+    local titles=("collect" "can1" "can3" "can6" "ac_one" "joy" "realsense")
     for title in "${titles[@]}"; do
         log_info "关闭终端窗口: $title"
         if command -v wmctrl &> /dev/null; then
-            # 获取窗口ID并检查是否存在
-            local window_ids=$(wmctrl -l 2>/dev/null | grep "$title" | awk '{print $1}')
+            # 更精确地匹配窗口标题，避免误关闭Cursor终端
+            local window_ids=$(wmctrl -l 2>/dev/null | grep -E "gnome-terminal.*$title|Terminal.*$title" | awk '{print $1}')
             if [ -n "$window_ids" ]; then
                 echo "$window_ids" | while read -r window_id; do
                     if [ -n "$window_id" ]; then
-                        wmctrl -i -c "$window_id" 2>/dev/null || true
+                        # 检查窗口是否仍然存在
+                        if wmctrl -l 2>/dev/null | grep -q "^$window_id "; then
+                            wmctrl -i -c "$window_id" 2>/dev/null || true
+                            log_info "  已关闭窗口: $window_id"
+                        fi
                     fi
                 done
             else
@@ -271,7 +275,7 @@ main() {
 
     # 启动ROS2系统 (使用ros_openpi环境)
     log_step "启动ROS2机械臂控制器 (ros_openpi环境)..."
-    gnome-terminal --title="lift" -x $shell_type -i -c "
+    gnome-terminal --title="ac_one" -x $shell_type -i -c "
         eval \"\$(mamba shell hook --shell bash)\";
         mamba activate ros_openpi;
         cd ${workspace}/../../ROS2/X5_ws;
@@ -382,7 +386,7 @@ main() {
     log_info ""
     log_info "按 Enter 键退出脚本并清理所有进程（终端窗口保留）..."
     read -r
-    log_info "开始清理所有进程..."
+    log_info "开始安全清理所有进程..."
     cleanup_processes
     log_info "脚本退出，所有进程已清理，终端窗口保留"
 
