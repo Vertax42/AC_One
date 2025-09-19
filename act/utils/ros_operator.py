@@ -419,13 +419,41 @@ class RosOperator(Node):
 
         return
 
-    def follow_arm_publish_continuous(self, left_target, right_target):
-        arm_steps_length = [0.05, 0.05, 0.03, 0.05, 0.05, 0.05, 0.2]
+    def follow_arm_publish_continuous(
+        self, left_target, right_target, arm_steps_length=None, max_steps=1000
+    ):
+        """
+        连续发布机械臂控制命令，平滑移动到目标位置
+
+        Args:
+            left_target: 左臂目标位置
+            right_target: 右臂目标位置
+            arm_steps_length: 每关节步长，默认使用预设值
+            max_steps: 最大步数，防止无限循环
+        """
+        if arm_steps_length is None:
+            arm_steps_length = [0.01, 0.01, 0.005, 0.01, 0.01, 0.01, 0.04]
+
+        # 验证输入
+        if len(left_target) != 7 or len(right_target) != 7:
+            self.get_logger().error(
+                f"Invalid joint length: left={len(left_target)}, right={len(right_target)}"
+            )
+            return False
+
+        if len(arm_steps_length) != 7:
+            self.get_logger().error(f"Invalid steps length: {len(arm_steps_length)}")
+            return False
+
         left_arm = None
         right_arm = None
-
         rate = self.create_rate(self.args.frame_rate)
-        while rclpy.ok():
+
+        # 等待获取当前机械臂位置，添加超时机制
+        timeout_count = 0
+        max_timeout = 100  # 约1.7秒超时
+
+        while rclpy.ok() and timeout_count < max_timeout:
             if len(self.feedback_left_arm_deque) != 0:
                 left_arm = list(self.feedback_left_arm_deque[-1].joint_pos)
 
@@ -435,55 +463,71 @@ class RosOperator(Node):
             if left_arm is not None and right_arm is not None:
                 break
 
-        # 计算方向标志位
-        left_symbol = [
-            1 if left_target[i] - left_arm[i] > 0 else -1
-            for i in range(len(left_target))
-        ]
-        right_symbol = [
-            1 if right_target[i] - right_arm[i] > 0 else -1
-            for i in range(len(right_target))
-        ]
-
-        step = 0
-        while rclpy.ok():
-            left_done = 0
-            right_done = 0
-
-            if self.follow_arm_publish_lock.acquire(False):
-                return
-
-            left_done = self._update_arm_position(
-                left_target, left_arm, left_symbol, arm_steps_length
-            )
-            right_done = self._update_arm_position(
-                right_target, right_arm, right_symbol, arm_steps_length
-            )
-
-            if left_done > len(left_target) - 1 and right_done > len(right_target) - 1:
-                print("left_done and right_done")
-
-                break
-
-            # JointControl topic
-            if len(left_arm) == 7:
-                left_joint_state_msg = self.robot_status()
-                right_joint_state_msg = self.robot_status()
-            else:
-                print("\033[31mInvalid joint length\033[0m")
-
-                return
-
-            left_joint_state_msg.joint_pos = np.asarray(left_arm, dtype=np.float64)
-            right_joint_state_msg.joint_pos = np.asarray(right_arm, dtype=np.float64)
-
-            self.controller_arm_left_publisher.publish(left_joint_state_msg)
-            # rate.sleep()
-            self.controller_arm_right_publisher.publish(right_joint_state_msg)
-
-            step += 1
-            print("arm_publish_continuous:", step)
+            timeout_count += 1
             rate.sleep()
+
+        if left_arm is None or right_arm is None:
+            self.get_logger().error(
+                "Failed to get current arm positions within timeout"
+            )
+            return False
+
+        # 计算方向标志位
+        left_symbol = np.sign(np.array(left_target) - np.array(left_arm))
+        right_symbol = np.sign(np.array(right_target) - np.array(right_arm))
+
+        # 预创建消息对象，避免重复创建
+        left_joint_state_msg = self.robot_status()
+        right_joint_state_msg = self.robot_status()
+
+        # 检查锁状态，如果无法获取锁则直接返回
+        if not self.follow_arm_publish_lock.acquire(False):
+            self.get_logger().warn("Cannot acquire lock, another operation in progress")
+            return False
+
+        try:
+            step = 0
+            while rclpy.ok() and step < max_steps:
+                left_done = self._update_arm_position(
+                    left_target, left_arm, left_symbol, arm_steps_length
+                )
+                right_done = self._update_arm_position(
+                    right_target, right_arm, right_symbol, arm_steps_length
+                )
+
+                # 检查是否到达目标位置
+                if left_done >= len(left_target) and right_done >= len(right_target):
+                    self.get_logger().info(f"Reached target positions in {step} steps")
+                    break
+
+                # 更新消息内容
+                left_joint_state_msg.joint_pos = np.asarray(left_arm, dtype=np.float64)
+                right_joint_state_msg.joint_pos = np.asarray(
+                    right_arm, dtype=np.float64
+                )
+
+                # 发布控制命令
+                self.controller_arm_left_publisher.publish(left_joint_state_msg)
+                self.controller_arm_right_publisher.publish(right_joint_state_msg)
+
+                step += 1
+
+                # 减少调试信息输出频率
+                if step % 50 == 0:
+                    self.get_logger().info(f"Arm movement progress: step {step}")
+
+                rate.sleep()
+
+            if step >= max_steps:
+                self.get_logger().warn(
+                    f"Reached maximum steps ({max_steps}), movement may be incomplete"
+                )
+
+        finally:
+            # 确保释放锁
+            self.follow_arm_publish_lock.release()
+
+        return True
 
     def _extract_eef_data(self, eef):
         return [eef.x, eef.y, eef.z, eef.roll, eef.pitch, eef.yaw]

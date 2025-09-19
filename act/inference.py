@@ -261,8 +261,8 @@ def get_obervations(args, timestep, ros_operator):
 
 
 def init_robot(ros_operator, use_base, connected_event, start_event):
-    init0 = [0.0, 0.948, 0.858, -0.573, 0.0, 0.0, -2.8]
-    init1 = [0.0, 0.948, 0.858, -0.573, 0.0, 0.0, 0.0]
+    init0 = [0.0, 0.0, 0.0, -0.0, 0.0, 0.0, 1]  # open gripper
+    init1 = [0.0, 0.0, 0.0, -0.0, 0.0, 0.0, 0.0]  # close gripper
 
     # 发布初始位置（关节空间姿态）
     ros_operator.follow_arm_publish_continuous(init0, init0)

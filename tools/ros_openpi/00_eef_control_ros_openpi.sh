@@ -197,7 +197,7 @@ main() {
         cd ${workspace}/../../ROS2/X5_ws;
         source install/setup.bash;
         echo \"Python版本: \$(python --version)\";
-        echo \"ROS2版本: ros2 humble\";
+        echo \"ROS2版本: \$ROS_DISTRO\";
         ros2 launch arx_x5_controller v2_eef_control.launch.py;
         $shell_exec"
     sleep 3
