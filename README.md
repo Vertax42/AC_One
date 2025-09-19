@@ -52,3 +52,7 @@ mamba activate ros_openpi
 # check ros2 package python version
 cd ${ros2_ws}
 grep "PYTHON_EXECUTABLE" ./build/*/CMakeCache.txt
+
+# pyttsx3 dependency problem
+sudo cp -rf /usr/share/alse ~/miniconda3/envs/ros_openpi/share
+sudo cp -rf /usr/lib/x86_64-linux-gnu/alsa-lib ~/miniconda3/envs/ros_openpi/lib

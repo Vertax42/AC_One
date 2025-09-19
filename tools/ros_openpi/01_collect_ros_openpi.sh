@@ -168,7 +168,7 @@ check_environment() {
         return 1
     fi
 
-    # 检查是否是用正确Python版本编译的 - 修复检测逻辑
+    # 检查是否是用正确Python版本编译的 openpi-python3.11 修复检测逻辑
     if [ -f "../../ROS2/X5_ws/build/arx_x5_controller/CMakeCache.txt" ]; then
         if grep -q "python3.11" ../../ROS2/X5_ws/build/arx_x5_controller/CMakeCache.txt 2>/dev/null; then
             log_info "ROS2工作空间已用Python3.11编译"
@@ -330,7 +330,7 @@ main() {
         echo \"Python版本: \$(python --version)\";
         echo \"Python路径: \$(which python)\";
         echo \"ROS2版本: \$ROS_DISTRO\";
-        python collect.py --episode_idx -1 --num_episodes 50 --max_timesteps 3600 --frame_rate 60 2>/dev/null;
+        python collect.py --episode_idx -1 --num_episodes 100 --max_timesteps 3600 --frame_rate 60 2>/dev/null;
         $shell_exec"
 
     log_info "数据采集系统启动完成！"
