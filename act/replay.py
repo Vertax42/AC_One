@@ -58,8 +58,6 @@ def load_hdf5(dataset_path):
             eefs = root.get("/observations/eef")
             actions = root.get("/action")
             actions_eefs = root.get("/action_eef")
-            action_base = root.get("/action_base")
-            action_velocity = root.get("/action_velocity")
 
             # 确保所有所需的数据集都存在
             if any(
@@ -69,8 +67,6 @@ def load_hdf5(dataset_path):
                     eefs,
                     actions,
                     actions_eefs,
-                    action_base,
-                    action_velocity,
                 ]
             ):
                 missing_datasets = [
@@ -81,16 +77,12 @@ def load_hdf5(dataset_path):
                             "/observations/eef",
                             "/action",
                             "/action_eef",
-                            "/action_base",
-                            "/action_velocity",
                         ],
                         [
                             qposes,
                             eefs,
                             actions,
                             actions_eefs,
-                            action_base,
-                            action_velocity,
                         ],
                     )
                     if item is None
@@ -105,14 +97,12 @@ def load_hdf5(dataset_path):
                 eefs[()],
                 actions[()],
                 actions_eefs[()],
-                action_base[()],
-                action_velocity[()],
             )
     except Exception as e:
         raise RuntimeError(f"Error occurred while loading the HDF5 file: {e}")
 
 
-def robot_action(ros_operator, args, action, action_base, actions_velocity):
+def robot_action(ros_operator, args, action):
     gripper_idx = [6, 13]
 
     left_action = action[: gripper_idx[0] + 1]  # 取8维度
@@ -124,34 +114,23 @@ def robot_action(ros_operator, args, action, action_base, actions_velocity):
         left_action, right_action
     )  # follow_arm_publish_continuous_thread
 
-    if args.use_base:
-        ros_operator.set_robot_base_target(
-            np.concatenate([action_base, actions_velocity])
-        )
 
+def init_robot(
+    ros_operator,
+):
+    init0 = [0.0, 0.0, 0.0, -0.0, 0.0, 0.0, 1]  # open gripper
+    init1 = [0.0, 0.0, 0.0, -0.0, 0.0, 0.0, 0.0]  # close gripper
 
-def init_robot(ros_operator, use_base):
-    init0 = [0.0, 0.00, 0.0, -0.0, 0.0, 0.0, 1.0]
-    init1 = [0.0, 0.0, 0.0, -0.0, 0.0, 0.0, 0.0]
+    # 发布初始位置（关节空间姿态）
+    print("Initializing robot - opening gripper...")
+    success = ros_operator.follow_arm_publish_continuous(init0, init0)
+    if not success:
+        print("Warning: Failed to open gripper, continuing anyway...")
 
-    ros_operator.follow_arm_publish_continuous(init0, init0)
-    ros_operator.robot_base_shutdown()
-
-    if use_base:
-        input("Enter any key to continue :")
-
-        ros_operator.start_base_control_thread()
-        ros_operator.follow_arm_publish_continuous(init1, init1)
-
-
-def signal_handler(signal, frame, ros_operator):
-    print("Caught Ctrl+C / SIGINT signal")
-
-    # 底盘给零
-    ros_operator.robot_base_shutdown()
-    ros_operator.base_control_thread.join()
-
-    sys.exit(0)
+    print("Initializing robot - closing gripper...")
+    success = ros_operator.follow_arm_publish_continuous(init1, init1)
+    if not success:
+        print("Warning: Failed to close gripper, continuing anyway...")
 
 
 def main(args):
@@ -165,13 +144,14 @@ def main(args):
     spin_thread = threading.Thread(target=rclpy.spin, args=(ros_operator,), daemon=True)
     spin_thread.start()
 
-    signal.signal(signal.SIGINT, partial(signal_handler, ros_operator=ros_operator))
+    (
+        qpoes,
+        eefs,
+        actions,
+        actions_eefs,
+    ) = load_hdf5(args.episode_path)
 
-    qpoes, eefs, actions, actions_eefs, action_base, actions_velocity = load_hdf5(
-        args.episode_path
-    )
-
-    init_robot(ros_operator, args.use_base)
+    init_robot(ros_operator)
 
     if args.states_replay:
         replay_actions = actions
@@ -185,12 +165,8 @@ def main(args):
             ros_operator,
             args,
             replay_actions[idx],
-            action_base[idx],
-            actions_velocity[idx],
         )
         rate.sleep()
-
-    ros_operator.base_enable = False
 
     ros_operator.destroy_node()
     rclpy.shutdown()
@@ -209,7 +185,6 @@ def parse_args(known=False):
         help="config file",
     )
 
-    parser.add_argument("--use_base", action="store_true", help="use base")
     parser.add_argument(
         "--record",
         choices=["Distance", "Speed"],

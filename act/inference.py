@@ -478,14 +478,12 @@ def inference_process(args, config, shm_dict, shapes, ros_proc):
         return
 
     chunk_size = config["policy_config"]["chunk_size"]
-    hidden_dim = config["policy_config"]["hidden_dim"]
     action_dim = config["policy_config"]["action_dim"]
 
     use_qvel = config["policy_config"]["use_qvel"]
     use_effort = config["policy_config"]["use_effort"]
     use_eef_states = config["policy_config"]["use_eef_states"]
 
-    use_robot_base = config["policy_config"]["use_base"]
     action = np.zeros((action_dim,))
 
     pre_left_states_process = (
@@ -493,15 +491,6 @@ def inference_process(args, config, shm_dict, shapes, ros_proc):
     )
     pre_right_states_process = (
         lambda s: (s - stats["right_states_mean"]) / stats["right_states_std"]
-    )
-    pre_robot_base_process = (
-        lambda s: (s - stats["robot_base_mean"]) / stats["robot_base_std"]
-    )
-    pre_robot_head_process = (
-        lambda s: (s - stats["robot_head_mean"]) / stats["robot_head_std"]
-    )
-    pre_base_velocity_process = (
-        lambda s: (s - stats["base_velocity_mean"]) / stats["base_velocity_std"]
     )
 
     def post_process(a):
@@ -533,7 +522,7 @@ def inference_process(args, config, shm_dict, shapes, ros_proc):
         print("✅ 动作历史数组已创建")
 
     timestep = 0
-    rate = Rate(args.frame_rate)  # 添加频率控制
+    # rate = Rate(args.frame_rate)  # 添加频率控制
 
     # 添加性能监控
     import time
@@ -548,8 +537,6 @@ def inference_process(args, config, shm_dict, shapes, ros_proc):
                 "qpos": None,
                 "qvel": None,
                 "effort": None,
-                "robot_base": None,
-                "base_velocity": None,
             }
 
             # 从共享内存读取
@@ -625,19 +612,6 @@ def inference_process(args, config, shm_dict, shapes, ros_proc):
             left_states = np.concatenate((left_states, right_states), axis=0)
             right_states = left_states
 
-            robot_base = obs_dict["robot_base"][:3]
-
-            robot_base = pre_robot_base_process(robot_base)
-            robot_base = torch.from_numpy(robot_base).float().cuda().unsqueeze(0)
-
-            robot_head = obs_dict["robot_base"][3:6]
-            robot_head = pre_robot_head_process(robot_head)
-            robot_head = torch.from_numpy(robot_head).float().cuda().unsqueeze(0)
-
-            base_velocity = obs_dict["base_velocity"]
-            base_velocity = pre_base_velocity_process(base_velocity)
-            base_velocity = torch.from_numpy(base_velocity).float().cuda().unsqueeze(0)
-
             left_states = pre_left_states_process(left_states)
             left_states = torch.from_numpy(left_states).float().cuda().unsqueeze(0)
 
@@ -656,9 +630,6 @@ def inference_process(args, config, shm_dict, shapes, ros_proc):
                     curr_depth_image,
                     left_states,
                     right_states,
-                    robot_base=robot_base,
-                    robot_head=robot_head,
-                    base_velocity=base_velocity,
                 )
 
                 if config["temporal_agg"]:
