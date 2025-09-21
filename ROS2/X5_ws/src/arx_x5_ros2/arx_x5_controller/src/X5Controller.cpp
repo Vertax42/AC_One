@@ -70,21 +70,6 @@ X5Controller::X5Controller() : Node("x5_controller_node") {
     SetRobotState(InterfacesThread::state::END_CONTROL);
     // Timer for publishing joint information
     timer_ = this->create_wall_timer(std::chrono::milliseconds(10), std::bind(&X5Controller::PubState, this));
-  } else if (arm_control_type == "vr_slave") {
-    // vr control mode
-    RCLCPP_INFO(this->get_logger(), "vr remote control mode started");
-    // create vr joint state publisher
-    vr_joint_state_publisher_ = this->create_publisher<arm_control::msg::PosCmd>(
-      this->declare_parameter("arm_pub_topic_name", "arm_status"), 10);
-
-    joint_state_publisher_ = this->create_publisher<arx5_arm_msg::msg::RobotStatus>(this->declare_parameter("arm_pub_topic_name", "arm_status") + "_full", 1);
-    // create vr joint state subscriber
-    vr_joint_state_subscriber_ = this->create_subscription<arm_control::msg::PosCmd>(
-        this->declare_parameter("arm_sub_topic_name", "ARX_VR_L"),
-        10,
-        std::bind(&X5Controller::VrCmdCallback, this, std::placeholders::_1));
-    // timer for publishing joint information
-    timer_ = this->create_wall_timer(std::chrono::milliseconds(1), std::bind(&X5Controller::VrPubState, this));
   } else if (arm_control_type == "remote_master") {
     // G_COMPENSATION mode
     RCLCPP_INFO(this->get_logger(), "remote master mode started");
@@ -219,88 +204,6 @@ void X5Controller::PubState() {
   
   // publish message
   joint_state_publisher_->publish(message);
-}
-
-void X5Controller::VrCmdCallback(const arm_control::msg::PosCmd::SharedPtr msg) {
-  // RCLCPP_INFO(this->get_logger(), "接收到数据");
-  double input[6] = {msg->x, msg->y, msg->z, msg->roll, msg->pitch, msg->yaw};
-  Eigen::Isometry3d transform = solve::Xyzrpy2Isometry(input);
-
-  interfaces_ptr_->setEndPose(transform);
-
-  SetRobotState(InterfacesThread::state::END_CONTROL);
-
-  double gripper = msg->gripper;
-  if(new_version_)
-    gripper *= (-3.4 / 5);
-  interfaces_ptr_->setCatch(gripper);
-}
-
-void X5Controller::VrPubState() {
-  // RCLCPP_INFO(this->get_logger(), "Publish data");
-  auto message = arm_control::msg::PosCmd();
-  // message.header.stamp = this->get_clock()->now();
-
-  Eigen::Isometry3d transform = interfaces_ptr_->getEndPose();
-
-  // extract quaternion and translation
-  Eigen::Quaterniond quat(transform.rotation());
-  Eigen::Vector3d translation = transform.translation();
-
-  std::vector<double> xyzrpy = solve::Isometry2Xyzrpy(transform);
-
-  // fill in vectors
-
-  message.x = xyzrpy[0];
-  message.y = xyzrpy[1];
-  message.z = xyzrpy[2];
-  message.roll = xyzrpy[3];
-  message.pitch = xyzrpy[4];
-  message.yaw = xyzrpy[5];
-  message.quater_x = quat.x();
-  message.quater_y = quat.y();
-  message.quater_z = quat.z();
-  message.quater_w = quat.w();
-
-  std::vector<double> joint_pos_vector = interfaces_ptr_->getJointPositons();
-  std::vector<double> joint_velocities_vector = interfaces_ptr_->getJointVelocities();
-  std::vector<double> joint_current_vector = interfaces_ptr_->getJointCurrent();
-
-  message.gripper = joint_pos_vector[6];
-
-  // 发布消息
-  vr_joint_state_publisher_->publish(message);
-
-  //==========================================================
-  auto msg = arx5_arm_msg::msg::RobotStatus();
-  msg.header.stamp = this->get_clock()->now();
-
-  // create a vector of length 6
-  std::array<double, 6> result;
-
-  // fill in vectors
-  result[0] = xyzrpy[0];
-  result[1] = xyzrpy[1];
-  result[2] = xyzrpy[2];
-  result[3] = xyzrpy[3];
-  result[4] = xyzrpy[4];
-  result[5] = xyzrpy[5];
-
-  msg.end_pos = result;
-
-  for (int i = 0; i < 7; i++) {
-    msg.joint_pos[i] = joint_pos_vector[i];
-  }
-
-  for (int i = 0; i < 7; i++) {
-    msg.joint_vel[i] = joint_velocities_vector[i];
-  }
-
-  for (int i = 0; i < 7; i++) {
-    msg.joint_cur[i] = joint_current_vector[i];
-  }
-  // publish message
-  joint_state_publisher_->publish(msg);
 }
 
 void X5Controller::FollowCmdCallback(const arx5_arm_msg::msg::RobotStatus::SharedPtr msg) {

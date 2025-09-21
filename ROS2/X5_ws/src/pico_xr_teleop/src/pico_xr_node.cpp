@@ -1,406 +1,403 @@
-#include <rclcpp/rclcpp.hpp>
-#include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
-#include <sensor_msgs/msg/joy.hpp>
-#include <std_msgs/msg/float64.hpp>
-#include <PXREARobotSDK.h>
-#include <nlohmann/json.hpp>
-#include <mutex>
-#include <atomic>
-#include <array>
-#include <string>
-
-// Include common_tools logging system
-#include <utils_common.h>
-#include <utils_logger.hpp>
-#include <utils_colorprint.hpp>
-#include <log4z.h>
+#include "pico_xr_teleop/pico_xr_node.hpp"
 
 using json = nlohmann::json;
 
-// // 自定义立即输出的日志宏
-// #define LOGI(msg) do { \
-//     std::cout << "[INFO] " << msg << std::endl; \
-//     std::cout.flush(); \
-// } while(0)
-
-// #define LOGFMTI(fmt, ...) do { \
-//     char buffer[1024]; \
-//     snprintf(buffer, sizeof(buffer), fmt, ##__VA_ARGS__); \
-//     std::cout << "[INFO] " << buffer << std::endl; \
-//     std::cout.flush(); \
-// } while(0)
-
-// #define LOGFMTW_IMMEDIATE(fmt, ...) do { \
-//     char buffer[1024]; \
-//     snprintf(buffer, sizeof(buffer), fmt, ##__VA_ARGS__); \
-//     std::cout << "[WARN] " << buffer << std::endl; \
-//     std::cout.flush(); \
-// } while(0)
-
-class PicoXRNode : public rclcpp::Node
+namespace pico_xr_teleop
 {
-public:
-    PicoXRNode() : Node("pico_xr_node")
-    {
-        // Connection status flags
-        server_connected_ = false;
-        device_connected_ = false;
-        last_data_time_ = this->get_clock()->now();
-        should_stop_ = false;
-        // Publishers for left controller
-        left_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>(
-            "/pico_xr/left_controller/pose", 10);
-        left_buttons_pub_ = this->create_publisher<sensor_msgs::msg::Joy>(
-            "/pico_xr/left_controller/joy", 10);
-        
-        // Publishers for right controller
-        right_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>(
-            "/pico_xr/right_controller/pose", 10);
-        right_buttons_pub_ = this->create_publisher<sensor_msgs::msg::Joy>(
-            "/pico_xr/right_controller/joy", 10);
-        
-        // Publisher for headset
-        headset_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>(
-            "/pico_xr/headset/pose", 10);
-        
-        // Initialize controller data
-        left_controller_pose_.fill(0.0);
-        right_controller_pose_.fill(0.0);
-        headset_pose_.fill(0.0);
-        left_trigger_ = 0.0;
-        right_trigger_ = 0.0;
-        left_grip_ = 0.0;
-        right_grip_ = 0.0;
-        
-        // Initialize PICO XR SDK
-        int ret = PXREAInit(this, OnPXREAClientCallback, PXREAFullMask);
-        if (ret != 0) {
-            LOGFMTE("Failed to initialize PICO XR SDK: %d", ret);
-            return;
-        }
-        
-        LOGFMTI("PICO XR SDK initialized successfully");
-        
-        // Create timer to publish data
-        timer_ = this->create_wall_timer(
-            std::chrono::milliseconds(10),  // 100Hz
-            std::bind(&PicoXRNode::publish_data, this));
-            
-        // Start background thread for status monitoring
-        status_thread_ = std::thread(&PicoXRNode::status_monitor_loop, this);
-    }
-    
-    ~PicoXRNode()
-    {
-        // Stop the status monitoring thread
-        should_stop_ = true;
-        if (status_thread_.joinable()) {
-            status_thread_.join();
-        }
-        
-        PXREADeinit();
-        // PICO XR SDK deinitialized
-        LOGI("PICO XR SDK deinitialized");
-    }
 
-private:
-    static void OnPXREAClientCallback(void* context, PXREAClientCallbackType type, int status, void* userData)
-    {
-        PicoXRNode* node = static_cast<PicoXRNode*>(context);
-        node->handle_callback(type, status, userData);
+PicoXRNode::PicoXRNode() : Node("pico_xr_node")
+{
+    // Connection status flags
+    server_connected_ = false;
+    device_connected_ = false;
+    last_data_time_ = this->get_clock()->now();
+    should_stop_ = false;
+    
+    // Publishers for left controller
+    left_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(
+        "/pico_xr/left_controller/pose", 10);
+    left_buttons_pub_ = this->create_publisher<sensor_msgs::msg::Joy>(
+        "/pico_xr/left_controller/joy", 10);
+    
+    // Publishers for right controller
+    right_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(
+        "/pico_xr/right_controller/pose", 10);
+    right_buttons_pub_ = this->create_publisher<sensor_msgs::msg::Joy>(
+        "/pico_xr/right_controller/joy", 10);
+    
+    // Publisher for headset
+    headset_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(
+        "/pico_xr/headset/pose", 10);
+    
+    // Initialize controller data
+    left_controller_pose_.fill(0.0);
+    right_controller_pose_.fill(0.0);
+    headset_pose_.fill(0.0);
+    left_trigger_ = 0.0;
+    right_trigger_ = 0.0;
+    left_grip_ = 0.0;
+    right_grip_ = 0.0;
+    
+    // Initialize PICO XR SDK
+    int ret = PXREAInit(this, PicoXRNode::OnPXREAClientCallback, PXREAFullMask);
+    if (ret != 0) {
+        RCLCPP_ERROR(this->get_logger(), "❌ Failed to initialize PICO XR SDK: %d", ret);
+        return;
     }
     
-    void handle_callback(PXREAClientCallbackType type, int status, void* userData)
-    {
-        switch (type)
-        {
-        case PXREAServerConnect:
-            server_connected_ = true;
-            // PICO XR server connected
-            LOGI("PICO XR server connected");
-            break;
-        case PXREAServerDisconnect:
-            server_connected_ = false;
-            device_connected_ = false;
-            // PICO XR server disconnected
-            LOGFMTW("PICO XR server disconnected");
-            break;
-        case PXREADeviceFind:
-            // PICO XR device found
-            LOGFMTI("PICO XR device found: %s", (const char*)userData);
-            break;
-        case PXREADeviceMissing:
-            device_connected_ = false;
-            // PICO XR device missing
-            LOGFMTW("PICO XR device missing: %s", (const char*)userData);
-            break;
-        case PXREADeviceConnect:
-            device_connected_ = (status == 0);
-            // PICO XR device connected
-            LOGFMTI("PICO XR device connected: %s (status: %d)", 
-                          (const char*)userData, status);
-            break;
-        case PXREADeviceStateJson:
-            last_data_time_ = this->get_clock()->now();
-            // If we're receiving data, we can assume device is connected
-            if (!device_connected_) {
-                device_connected_ = true;
-                // PICO XR device connected and receiving data
-                LOGI("✅ PICO XR device connected and receiving data!");
-                // Device connected, status monitor loop will exit
-            }
-            process_device_state(userData);
-            break;
-        default:
-            break;
-        }
-    }
+    RCLCPP_INFO(this->get_logger(), "✅ PICO XR SDK initialized successfully");
+    RCLCPP_INFO(this->get_logger(), "🚀 PICO XR Teleoperation Node started successfully");
+    RCLCPP_INFO(this->get_logger(), "📡 Publishing topics:");
+    RCLCPP_INFO(this->get_logger(), "   • /pico_xr/left_controller/pose");
+    RCLCPP_INFO(this->get_logger(), "   • /pico_xr/left_controller/joy");
+    RCLCPP_INFO(this->get_logger(), "   • /pico_xr/right_controller/pose");
+    RCLCPP_INFO(this->get_logger(), "   • /pico_xr/right_controller/joy");
+    RCLCPP_INFO(this->get_logger(), "   • /pico_xr/headset/pose");
+    RCLCPP_INFO(this->get_logger(), "⏳ Waiting for PICO XR device connection...");
     
-    void process_device_state(void* userData)
-    {
-        auto& dsj = *((PXREADevStateJson*)userData);
+    // Create timer to publish data
+    timer_ = this->create_wall_timer(
+        std::chrono::milliseconds(10),  // 100Hz
+        std::bind(&PicoXRNode::publish_data, this));
         
-        try {
-            json data = json::parse(dsj.stateJson);
-            if (data.contains("value")) {
-                auto value = json::parse(data["value"].get<std::string>());
-                
-                // Process left controller
-                if (value["Controller"].contains("left")) {
-                    auto& left = value["Controller"]["left"];
-                    {
-                        std::lock_guard<std::mutex> lock(left_mutex_);
-                        left_controller_pose_ = string_to_pose_array(left["pose"].get<std::string>());
-                        left_trigger_ = left["trigger"].get<double>();
-                        left_grip_ = left["grip"].get<double>();
+    // Start background thread for status monitoring
+    status_monitor_thread_ = std::thread(&PicoXRNode::status_monitor_loop, this);
+}
+
+PicoXRNode::~PicoXRNode()
+{
+    // Stop the status monitoring thread
+    should_stop_ = true;
+    if (status_monitor_thread_.joinable()) {
+        status_monitor_thread_.join();
+    }
+    
+    PXREADeinit();
+    // PICO XR SDK deinitialized
+    RCLCPP_INFO(this->get_logger(), "🔌 PICO XR SDK deinitialized");
+}
+
+void PicoXRNode::OnPXREAClientCallback(void* context, PXREAClientCallbackType type, int status, void* userData)
+{
+    PicoXRNode* node = static_cast<PicoXRNode*>(context);
+    node->handle_callback(type, status, userData);
+}
+
+void PicoXRNode::handle_callback(PXREAClientCallbackType type, int status, void* userData)
+{
+    (void)status; // Suppress unused parameter warning
+    
+    switch (type)
+    {
+    case PXREAServerConnect:
+        server_connected_ = true;
+        // PICO XR server connected
+        RCLCPP_INFO(this->get_logger(), "🔗 PICO XR server connected successfully");
+        break;
+    case PXREAServerDisconnect:
+        server_connected_ = false;
+        // PICO XR server disconnected
+        RCLCPP_WARN(this->get_logger(), "⚠️ PICO XR server disconnected");
+        break;
+    case PXREADeviceConnect:
+        device_connected_ = true;
+        // PICO XR device connected
+        RCLCPP_INFO(this->get_logger(), "🎮 PICO XR device connected successfully");
+        break;
+    case PXREADeviceMissing:
+        device_connected_ = false;
+        // PICO XR device missing
+        RCLCPP_WARN(this->get_logger(), "⚠️ PICO XR device missing");
+        break;
+    case PXREADeviceStateJson:
+        // PICO XR data received
+        device_connected_ = true;
+        process_device_state(userData);
+        break;
+    default:
+        break;
+    }
+}
+
+void PicoXRNode::process_device_state(void* userData)
+{
+    if (!userData) return;
+    
+    PXREADevStateJson* state = static_cast<PXREADevStateJson*>(userData);
+    
+    // Update last data time
+    last_data_time_ = this->get_clock()->now();
+    
+    try {
+        json data = json::parse(state->stateJson);
+        if (data.contains("value")) {
+            auto value = json::parse(data["value"].get<std::string>());
+            
+            // Debug: Print JSON structure occasionally
+            static int json_debug_counter = 0;
+            if (json_debug_counter++ % 1000 == 0) {
+                RCLCPP_INFO(this->get_logger(), "🔍 JSON data received, has Controller: %s, has Head: %s", 
+                           value.contains("Controller") ? "✅" : "❌",
+                           value.contains("Head") ? "✅" : "❌");
+                           
+                // Print more detailed structure
+                if (value.contains("Controller")) {
+                    auto controller = value["Controller"];
+                    RCLCPP_INFO(this->get_logger(), "🔍 Controller has left: %s, right: %s", 
+                               controller.contains("left") ? "✅" : "❌",
+                               controller.contains("right") ? "✅" : "❌");
+                    
+                    if (controller.contains("left")) {
+                        auto left = controller["left"];
+                        RCLCPP_INFO(this->get_logger(), "🔍 Left has pose: %s, trigger: %s, grip: %s", 
+                                   left.contains("pose") ? "✅" : "❌",
+                                   left.contains("trigger") ? "✅" : "❌",
+                                   left.contains("grip") ? "✅" : "❌");
+                    }
+                    
+                    if (controller.contains("right")) {
+                        auto right = controller["right"];
+                        RCLCPP_INFO(this->get_logger(), "🔍 Right has pose: %s, trigger: %s, grip: %s", 
+                                   right.contains("pose") ? "✅" : "❌",
+                                   right.contains("trigger") ? "✅" : "❌",
+                                   right.contains("grip") ? "✅" : "❌");
+                    }
+                }
+            }
+            
+            // Process left controller data
+            if (value["Controller"].contains("left")) {
+                auto left = value["Controller"]["left"];
+                if (left.contains("pose")) {
+                    // Parse pose string (format: "x,y,z,qx,qy,qz,qw")
+                    std::string pose_str = left["pose"].get<std::string>();
+                    left_controller_pose_ = string_to_pose_array(pose_str);
+                    
+                    // Debug: Print pose data occasionally
+                    static int left_pose_debug_counter = 0;
+                    if (left_pose_debug_counter++ % 500 == 0) {
+                        RCLCPP_INFO(this->get_logger(), "🔍 Left pose updated: pos[%.3f,%.3f,%.3f] rot[%.3f,%.3f,%.3f,%.3f]", 
+                                   left_controller_pose_[0], left_controller_pose_[1], left_controller_pose_[2],
+                                   left_controller_pose_[3], left_controller_pose_[4], left_controller_pose_[5], left_controller_pose_[6]);
                     }
                 }
                 
-                // Process right controller
-                if (value["Controller"].contains("right")) {
-                    auto& right = value["Controller"]["right"];
-                    {
-                        std::lock_guard<std::mutex> lock(right_mutex_);
-                        right_controller_pose_ = string_to_pose_array(right["pose"].get<std::string>());
-                        right_trigger_ = right["trigger"].get<double>();
-                        right_grip_ = right["grip"].get<double>();
-                    }
+                if (left.contains("trigger")) {
+                    left_trigger_ = left["trigger"].get<double>();
+                }
+                if (left.contains("grip")) {
+                    left_grip_ = left["grip"].get<double>();
                 }
                 
-                // Process headset
-                if (value.contains("Head")) {
-                    auto& headset = value["Head"];
-                    {
-                        std::lock_guard<std::mutex> lock(headset_mutex_);
-                        headset_pose_ = string_to_pose_array(headset["pose"].get<std::string>());
-                    }
+                // Log button presses
+                static double last_left_trigger = 0.0;
+                static double last_left_grip = 0.0;
+                
+                if (std::abs(left_trigger_.load() - last_left_trigger) > 0.1) {
+                    RCLCPP_INFO(this->get_logger(), "🎯 Left trigger: %.2f", left_trigger_.load());
+                    last_left_trigger = left_trigger_.load();
+                }
+                
+                if (std::abs(left_grip_.load() - last_left_grip) > 0.1) {
+                    RCLCPP_INFO(this->get_logger(), "🤏 Left grip: %.2f", left_grip_.load());
+                    last_left_grip = left_grip_.load();
                 }
             }
-        } catch (const json::exception& e) {
-            LOGFMTE("JSON parsing error: %s", e.what());
-        }
-    }
-    
-    std::array<double, 7> string_to_pose_array(const std::string& pose_str)
-    {
-        std::array<double, 7> pose = {0};
-        std::istringstream iss(pose_str);
-        std::string token;
-        int i = 0;
-        
-        while (std::getline(iss, token, ',') && i < 7) {
-            try {
-                pose[i] = std::stod(token);
-                i++;
-            } catch (const std::exception& e) {
-                LOGFMTE("Failed to parse pose element: %s", token.c_str());
+            
+            // Process right controller data
+            if (value["Controller"].contains("right")) {
+                auto right = value["Controller"]["right"];
+                if (right.contains("pose")) {
+                    // Parse pose string (format: "x,y,z,qx,qy,qz,qw")
+                    std::string pose_str = right["pose"].get<std::string>();
+                    right_controller_pose_ = string_to_pose_array(pose_str);
+                }
+                
+                if (right.contains("trigger")) {
+                    right_trigger_ = right["trigger"].get<double>();
+                }
+                if (right.contains("grip")) {
+                    right_grip_ = right["grip"].get<double>();
+                }
+                
+                // Log button presses
+                static double last_right_trigger = 0.0;
+                static double last_right_grip = 0.0;
+                
+                if (std::abs(right_trigger_.load() - last_right_trigger) > 0.1) {
+                    RCLCPP_INFO(this->get_logger(), "🎯 Right trigger: %.2f", right_trigger_.load());
+                    last_right_trigger = right_trigger_.load();
+                }
+                
+                if (std::abs(right_grip_.load() - last_right_grip) > 0.1) {
+                    RCLCPP_INFO(this->get_logger(), "🤏 Right grip: %.2f", right_grip_.load());
+                    last_right_grip = right_grip_.load();
+                }
+            }
+            
+            // Process headset data (note: it's "Head" not "Headset" in JSON)
+            if (value.contains("Head")) {
+                auto headset = value["Head"];
+                if (headset.contains("pose")) {
+                    // Parse pose string (format: "x,y,z,qx,qy,qz,qw")
+                    std::string pose_str = headset["pose"].get<std::string>();
+                    headset_pose_ = string_to_pose_array(pose_str);
+                }
             }
         }
+    } catch (const std::exception& e) {
+        RCLCPP_WARN(this->get_logger(), "Failed to parse PICO XR data: %s", e.what());
+    }
+}
+
+void PicoXRNode::publish_data()
+{
+    static bool left_data_received = false;
+    static bool right_data_received = false;
+    static bool headset_data_received = false;
+    
+    // Check if we have valid left controller data (not all zeros)
+    bool left_valid = (left_controller_pose_[0] != 0.0 || left_controller_pose_[1] != 0.0 || left_controller_pose_[2] != 0.0 ||
+                      left_controller_pose_[3] != 0.0 || left_controller_pose_[4] != 0.0 || left_controller_pose_[5] != 0.0 || left_controller_pose_[6] != 0.0);
+    
+    if (left_valid) {
+        if (!left_data_received) {
+            RCLCPP_INFO(this->get_logger(), "📡 Started publishing left controller data");
+            left_data_received = true;
+        }
+        auto left_pose_msg = create_pose_message(left_controller_pose_, "left_controller");
+        left_pose_pub_->publish(left_pose_msg);
         
-        return pose;
+        auto left_joy_msg = create_buttons_message(left_trigger_.load(), left_grip_.load(), "left_controller");
+        left_buttons_pub_->publish(left_joy_msg);
     }
     
-    geometry_msgs::msg::PoseWithCovarianceStamped create_pose_message(const std::array<double, 7>& pose_array)
-    {
-        geometry_msgs::msg::PoseWithCovarianceStamped msg;
-        msg.header.stamp = this->get_clock()->now();
-        msg.header.frame_id = "pico_xr_frame";
+    // Check if we have valid right controller data (not all zeros)
+    bool right_valid = (right_controller_pose_[0] != 0.0 || right_controller_pose_[1] != 0.0 || right_controller_pose_[2] != 0.0 ||
+                       right_controller_pose_[3] != 0.0 || right_controller_pose_[4] != 0.0 || right_controller_pose_[5] != 0.0 || right_controller_pose_[6] != 0.0);
+    
+    if (right_valid) {
+        if (!right_data_received) {
+            RCLCPP_INFO(this->get_logger(), "📡 Started publishing right controller data");
+            right_data_received = true;
+        }
+        auto right_pose_msg = create_pose_message(right_controller_pose_, "right_controller");
+        right_pose_pub_->publish(right_pose_msg);
         
-        // Position (x, y, z)
-        msg.pose.pose.position.x = pose_array[0];
-        msg.pose.pose.position.y = pose_array[1];
-        msg.pose.pose.position.z = pose_array[2];
-        
-        // Orientation (quaternion: x, y, z, w)
-        msg.pose.pose.orientation.x = pose_array[3];
-        msg.pose.pose.orientation.y = pose_array[4];
-        msg.pose.pose.orientation.z = pose_array[5];
-        msg.pose.pose.orientation.w = pose_array[6];
-        
-        return msg;
+        auto right_joy_msg = create_buttons_message(right_trigger_.load(), right_grip_.load(), "right_controller");
+        right_buttons_pub_->publish(right_joy_msg);
     }
     
-    sensor_msgs::msg::Joy create_buttons_message(double trigger, double grip)
-    {
-        sensor_msgs::msg::Joy msg;
-        msg.header.stamp = this->get_clock()->now();
-        msg.header.frame_id = "pico_xr_frame";
-        
-        // Add trigger and grip values as axes
-        msg.axes.push_back(static_cast<float>(trigger));
-        msg.axes.push_back(static_cast<float>(grip));
-        
-        // Add button states (trigger > 0.5 and grip > 0.5 considered pressed)
-        msg.buttons.push_back(trigger > 0.5 ? 1 : 0);  // trigger button
-        msg.buttons.push_back(grip > 0.5 ? 1 : 0);     // grip button
-        
-        return msg;
+    // Check if we have valid headset data (not all zeros)
+    bool headset_valid = (headset_pose_[0] != 0.0 || headset_pose_[1] != 0.0 || headset_pose_[2] != 0.0 ||
+                         headset_pose_[3] != 0.0 || headset_pose_[4] != 0.0 || headset_pose_[5] != 0.0 || headset_pose_[6] != 0.0);
+    
+    if (headset_valid) {
+        if (!headset_data_received) {
+            RCLCPP_INFO(this->get_logger(), "📡 Started publishing headset data");
+            headset_data_received = true;
+        }
+        auto headset_pose_msg = create_pose_message(headset_pose_, "headset");
+        headset_pose_pub_->publish(headset_pose_msg);
     }
     
-    void check_connection_status()
-    {
+    // Debug: Print data reception status every 5 seconds
+    static auto last_debug_time = this->get_clock()->now();
+    auto now = this->get_clock()->now();
+    if ((now - last_debug_time).seconds() > 5.0) {
+        RCLCPP_INFO(this->get_logger(), "🔍 Data status - Left: %s, Right: %s, Headset: %s", 
+                   left_valid ? "✅" : "❌",
+                   right_valid ? "✅" : "❌", 
+                   headset_valid ? "✅" : "❌");
+        last_debug_time = now;
+    }
+}
+
+std::array<double, 7> PicoXRNode::string_to_pose_array(const std::string& poseStr)
+{
+    std::array<double, 7> result{0};
+    std::stringstream ss(poseStr);
+    std::string value;
+    int i = 0;
+    while (std::getline(ss, value, ',') && i < 7) {
+        result[i++] = std::stod(value);
+    }
+    return result;
+}
+
+geometry_msgs::msg::PoseStamped PicoXRNode::create_pose_message(const std::array<double, 7>& pose, const std::string& frame_suffix)
+{
+    geometry_msgs::msg::PoseStamped msg;
+    msg.header.stamp = this->get_clock()->now();
+    msg.header.frame_id = "pico_xr_" + frame_suffix + "_frame";
+    
+    msg.pose.position.x = pose[0];
+    msg.pose.position.y = pose[1];
+    msg.pose.position.z = pose[2];
+    msg.pose.orientation.x = pose[3];
+    msg.pose.orientation.y = pose[4];
+    msg.pose.orientation.z = pose[5];
+    msg.pose.orientation.w = pose[6];
+    
+    return msg;
+}
+
+sensor_msgs::msg::Joy PicoXRNode::create_buttons_message(double trigger, double grip, const std::string& controller_name)
+{
+    sensor_msgs::msg::Joy msg;
+    msg.header.stamp = this->get_clock()->now();
+    msg.header.frame_id = "pico_xr_" + controller_name + "_frame";
+    
+    // Buttons: trigger as button (pressed when > 0.9), grip as button (pressed when > 0.9)
+    msg.buttons = {
+        static_cast<int>(trigger > 0.9 ? 1 : 0),  // trigger button
+        static_cast<int>(grip > 0.9 ? 1 : 0)      // grip button
+    };
+    
+    // Axes: trigger value as axis[0], grip value as axis[1]
+    msg.axes = {
+        static_cast<float>(trigger),  // trigger axis (0.0 to 1.0)
+        static_cast<float>(grip)      // grip axis (0.0 to 1.0)
+    };
+    
+    return msg;
+}
+
+void PicoXRNode::status_monitor_loop()
+{
+    while (!should_stop_) {
         auto now = this->get_clock()->now();
         auto time_since_last_data = now - last_data_time_;
         
         // Check if we haven't received data for more than 5 seconds
         if (time_since_last_data.seconds() > 5.0) {
-            static auto last_warn_time = std::chrono::steady_clock::now();
-            auto current_time = std::chrono::steady_clock::now();
-            auto time_diff = std::chrono::duration_cast<std::chrono::seconds>(current_time - last_warn_time);
-            
-            if (time_diff.count() >= 5) {  // Throttle to every 5 seconds
-                // No data received warning
-                LOGFMTW("No data received for %.1f seconds", time_since_last_data.seconds());
-                last_warn_time = current_time;
+            if (device_connected_) {
+                RCLCPP_WARN(this->get_logger(), "⚠️ No data received for %.1f seconds", time_since_last_data.seconds());
             }
         }
         
-        // Log connection status
-        static auto last_status_time = std::chrono::steady_clock::now();
-        auto current_time = std::chrono::steady_clock::now();
-        auto time_diff = std::chrono::duration_cast<std::chrono::seconds>(current_time - last_status_time);
-        
-        if (time_diff.count() >= 10) {  // Throttle to every 10 seconds
-            LOGFMTI("Connection Status - Server: %s, Device: %s, Last data: %.1fs ago",
-                          server_connected_ ? "Connected" : "Disconnected",
-                          device_connected_ ? "Connected" : "Disconnected",
-                          time_since_last_data.seconds());
-            last_status_time = current_time;
-        }
-    }
-    
-    void status_monitor_loop()
-    {
-        int waiting_count = 0;
-        auto last_connection_check = std::chrono::steady_clock::now();
-        auto last_waiting_print = std::chrono::steady_clock::now();
-        
-        while (!should_stop_) {
-            auto now = std::chrono::steady_clock::now();
-            
-            // Check connection status every 2 seconds
-            if (std::chrono::duration_cast<std::chrono::seconds>(now - last_connection_check).count() >= 2) {
-                check_connection_status();
-                last_connection_check = now;
-            }
-            
-            // Print waiting status every 5 seconds
-            if (std::chrono::duration_cast<std::chrono::seconds>(now - last_waiting_print).count() >= 5) {
-                waiting_count++;
-                
-                if (!server_connected_ && !device_connected_) {
-                    LOGFMTI("⏳ Waiting for PICO XR connection... (attempt %d)", waiting_count);
-                    LOGI("   📋 Please ensure:");
-                    LOGI("   • PICO XR device is powered on");
-                    LOGI("   • Device is connected to the same network");
-                    LOGI("   • PICO XR server is running");
-                    LOGI("   • No firewall blocking the connection");
-                } else if (server_connected_ && !device_connected_) {
-                    LOGFMTI("🔗 Server connected, waiting for PICO XR device... (attempt %d)", waiting_count);
-                } else if (server_connected_ && device_connected_) {
-                    LOGI("✅ PICO XR device connected successfully!");
-                    break;  // Exit the loop once connected
-                }
-                
-                last_waiting_print = now;
-            }
-            
-            // Sleep for 100ms to avoid busy waiting
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
-    }
-    
-    void print_waiting_status()
-    {
-        // This function is now handled by status_monitor_loop
-    }
-    
-    void publish_data()
-    {
-        // Publish left controller data
-        {
-            std::lock_guard<std::mutex> lock(left_mutex_);
-            auto left_pose_msg = create_pose_message(left_controller_pose_);
-            auto left_buttons_msg = create_buttons_message(left_trigger_, left_grip_);
-            
-            left_pose_pub_->publish(left_pose_msg);
-            left_buttons_pub_->publish(left_buttons_msg);
+        // Log connection status every 10 seconds
+        static auto last_status_log = now;
+        if ((now - last_status_log).seconds() > 10.0) {
+            RCLCPP_INFO(this->get_logger(), "📊 Status - Server: %s, Device: %s", 
+                       server_connected_ ? "✅" : "❌",
+                       device_connected_ ? "✅" : "❌");
+            last_status_log = now;
         }
         
-        // Publish right controller data
-        {
-            std::lock_guard<std::mutex> lock(right_mutex_);
-            auto right_pose_msg = create_pose_message(right_controller_pose_);
-            auto right_buttons_msg = create_buttons_message(right_trigger_, right_grip_);
-            
-            right_pose_pub_->publish(right_pose_msg);
-            right_buttons_pub_->publish(right_buttons_msg);
-        }
-        
-        // Publish headset data
-        {
-            std::lock_guard<std::mutex> lock(headset_mutex_);
-            auto headset_pose_msg = create_pose_message(headset_pose_);
-            headset_pose_pub_->publish(headset_pose_msg);
-        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     }
-    
-    // Publishers
-    rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr left_pose_pub_;
-    rclcpp::Publisher<sensor_msgs::msg::Joy>::SharedPtr left_buttons_pub_;
-    rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr right_pose_pub_;
-    rclcpp::Publisher<sensor_msgs::msg::Joy>::SharedPtr right_buttons_pub_;
-    rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr headset_pose_pub_;
-    
-    // Timers
-    rclcpp::TimerBase::SharedPtr timer_;
-    
-    // Status monitoring thread
-    std::thread status_thread_;
-    std::atomic<bool> should_stop_;
-    
-    // Connection status
-    std::atomic<bool> server_connected_;
-    std::atomic<bool> device_connected_;
-    rclcpp::Time last_data_time_;
-    
-    // Data storage with mutexes
-    std::mutex left_mutex_;
-    std::mutex right_mutex_;
-    std::mutex headset_mutex_;
-    
-    std::array<double, 7> left_controller_pose_;
-    std::array<double, 7> right_controller_pose_;
-    std::array<double, 7> headset_pose_;
-    
-    std::atomic<double> left_trigger_;
-    std::atomic<double> right_trigger_;
-    std::atomic<double> left_grip_;
-    std::atomic<double> right_grip_;
-};
+}
 
-void signalHandler(int signum) {
-  rclcpp::shutdown();
+} // namespace pico_xr_teleop
+
+// Signal handler for graceful shutdown
+namespace {
+void signalHandler(int signal)
+{
+    RCLCPP_INFO(rclcpp::get_logger("pico_xr_node"), "Received signal %d, shutting down...", signal);
+    rclcpp::shutdown();
+}
 }
 
 int main(int argc, char* argv[])
@@ -426,7 +423,7 @@ int main(int argc, char* argv[])
     LOGI("Initializing PICO XR Node...");
 
     rclcpp::init(argc, argv);
-    rclcpp::spin(std::make_shared<PicoXRNode>());
+    rclcpp::spin(std::make_shared<pico_xr_teleop::PicoXRNode>());
 
     rclcpp::shutdown();
     return 0;

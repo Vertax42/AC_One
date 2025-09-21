@@ -35,10 +35,6 @@ public:
 
   void EefCmdCallback(const arm_control::msg::PosCmd::SharedPtr msg);
 
-  void VrCmdCallback(const arm_control::msg::PosCmd::SharedPtr msg);
-
-  void VrPubState();
-
   void FollowCmdCallback(const arx5_arm_msg::msg::RobotStatus::SharedPtr msg);
   void JointControlCallback(const arm_control::msg::JointControl::SharedPtr msg);
   void ArxJoyCallback(const std_msgs::msg::Int32MultiArray::SharedPtr msg);
@@ -78,13 +74,9 @@ private:
   rclcpp::Publisher<arx5_arm_msg::msg::RobotStatus>::SharedPtr joint_state_publisher_;
   // eef control mode
   rclcpp::Publisher<arm_control::msg::PosCmd>::SharedPtr eef_state_publisher_;
-  // vr mode
-  rclcpp::Publisher<arm_control::msg::PosCmd>::SharedPtr vr_joint_state_publisher_;
 
   // normal mode
   rclcpp::Subscription<arx5_arm_msg::msg::RobotCmd>::SharedPtr joint_state_subscriber_;
-  // vr mode
-  rclcpp::Subscription<arm_control::msg::PosCmd>::SharedPtr vr_joint_state_subscriber_;
   // eef control mode
   rclcpp::Subscription<arm_control::msg::PosCmd>::SharedPtr eef_joint_state_subscriber_;
   // remote from master mode

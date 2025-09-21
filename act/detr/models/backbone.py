@@ -40,9 +40,7 @@ from ..util.misc import NestedTensor, is_main_process
 from .position_encoding import build_position_encoding
 
 import IPython
-
 e = IPython.embed
-
 
 class FrozenBatchNorm2d(torch.nn.Module):
     """
@@ -60,29 +58,15 @@ class FrozenBatchNorm2d(torch.nn.Module):
         self.register_buffer("running_mean", torch.zeros(n))
         self.register_buffer("running_var", torch.ones(n))
 
-    def _load_from_state_dict(
-        self,
-        state_dict,
-        prefix,
-        local_metadata,
-        strict,
-        missing_keys,
-        unexpected_keys,
-        error_msgs,
-    ):
-        num_batches_tracked_key = prefix + "num_batches_tracked"
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        num_batches_tracked_key = prefix + 'num_batches_tracked'
         if num_batches_tracked_key in state_dict:
             del state_dict[num_batches_tracked_key]
 
         super(FrozenBatchNorm2d, self)._load_from_state_dict(
-            state_dict,
-            prefix,
-            local_metadata,
-            strict,
-            missing_keys,
-            unexpected_keys,
-            error_msgs,
-        )
+            state_dict, prefix, local_metadata, strict,
+            missing_keys, unexpected_keys, error_msgs)
 
     def forward(self, x):
         # move reshapes to the beginning
@@ -99,33 +83,21 @@ class FrozenBatchNorm2d(torch.nn.Module):
 
 class BackboneBase(nn.Module):
 
-    def __init__(
-        self,
-        name,
-        backbone: nn.Module,
-        train_backbone: bool,
-        num_channels: int,
-        return_interm_layers: bool,
-    ):
+    def __init__(self, name, backbone: nn.Module, train_backbone: bool, num_channels: int, return_interm_layers: bool):
         super().__init__()
         # for name, parameter in backbone.named_parameters(): # only train later layers # TODO do we want this?
         #     if not train_backbone or 'layer2' not in name and 'layer3' not in name and 'layer4' not in name:
         #         parameter.requires_grad_(False)
         if "resnet" in name:
             if return_interm_layers:
-                return_layers = {
-                    "layer1": "0",
-                    "layer2": "1",
-                    "layer3": "2",
-                    "layer4": "3",
-                }
+                return_layers = {"layer1": "0", "layer2": "1", "layer3": "2", "layer4": "3"}
             else:
-                return_layers = {"layer4": "0"}
+                return_layers = {'layer4': "0"}
             self.body = IntermediateLayerGetter(backbone, return_layers=return_layers)
-        elif "efficientnet" in name:  # efficientnet
+        elif 'efficientnet' in name:  # efficientnet
             return_layers = {"features": "0"}
             self.body = IntermediateLayerGetter(backbone, return_layers=return_layers)
-
+        
         self.num_channels = num_channels
 
     def forward(self, tensor):
@@ -143,14 +115,10 @@ class BackboneBase(nn.Module):
 
 class Backbone(BackboneBase):
     """ResNet backbone with frozen BatchNorm."""
-
-    def __init__(
-        self,
-        name: str,
-        train_backbone: bool,
-        return_interm_layers: bool,
-        dilation: bool,
-    ):
+    def __init__(self, name: str,
+                 train_backbone: bool,
+                 return_interm_layers: bool,
+                 dilation: bool):
         if name == "resnet18":
             weights = ResNet18_Weights.DEFAULT
             num_channels = 512
@@ -174,14 +142,14 @@ class Backbone(BackboneBase):
             num_channels = 1536
         else:
             raise ValueError
-
+        
         if "resnet" in name:
             backbone = getattr(torchvision.models, name)(
                 replace_stride_with_dilation=[False, False, dilation],
                 weights=weights,
                 norm_layer=FrozenBatchNorm2d,
             )  # pretrained
-        elif "efficientnet" in name:  # efficientnet
+        elif 'efficientnet' in name:  # efficientnet
             backbone = getattr(torchvision.models, name)(
                 weights=weights, norm_layer=FrozenBatchNorm2d
             )  # pretrained
@@ -191,10 +159,8 @@ class Backbone(BackboneBase):
         #     pretrained=is_main_process(), norm_layer=FrozenBatchNorm2d) # pretrained # TODO do we want frozen batch_norm??
         # num_channels = 512 if name in ('resnet18', 'resnet34') else 2048
 
-        super().__init__(
-            name, backbone, train_backbone, num_channels, return_interm_layers
-        )
-
+        super().__init__(name, backbone, train_backbone, num_channels, return_interm_layers)
+        
     def forward(self, tensor):
         # tensor = self.preprocess(tensor) # 第一版的ACT没有做 preprocess,做了效果很不好
         xs = self.body(tensor)
@@ -220,7 +186,6 @@ class Joiner(nn.Sequential):
             pos.append(self[1](x).to(x.dtype))
 
         return out, pos
-
 
 class FilMedBackbone(torch.nn.Module):
     """FiLMed image encoder backbone."""
@@ -258,10 +223,8 @@ class FilMedBackbone(torch.nn.Module):
             self.backbone.avgpool = nn.Sequential()  # remove average pool layer
             self.backbone.classifier = nn.Sequential()  # remove classification layer
         # Get image preprocessing function.
-        self.preprocess = weights.transforms(
-            antialias=False
-        )  # Use this to preprocess images the same way as the pretrained model (e.g., ResNet-18).
-
+        self.preprocess = (weights.transforms(antialias=False))  # Use this to preprocess images the same way as the pretrained model (e.g., ResNet-18).
+        
         # self.preprocess = transforms.Compose([ # Use this if you don't want to resize images to 224x224.
         #     transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         # ])
@@ -270,10 +233,8 @@ class FilMedBackbone(torch.nn.Module):
         # img_obs shape: (batch_size, 3, H, W)
         img_obs = img_obs.float()  # cast to float type
         img_obs = self.preprocess(img_obs)
-        out = self.backbone(
-            img_obs, language_embed
-        )  # shape (B, C_final * H_final * W_final) or (B, C_final, H_final, W_final)
-
+        out = self.backbone(img_obs, language_embed)  # shape (B, C_final * H_final * W_final) or (B, C_final, H_final, W_final)
+        
         # If needed, unflatten output tensor from (B, C_final * H_final * W_final) to (B, C_final, H_final, W_final)
         if len(out.shape) == 2:
             H_final = W_final = int(math.sqrt(out.shape[-1] // self.num_channels))
@@ -306,17 +267,15 @@ def build_backbone(args):
     train_backbone = args.lr_backbone > 0
     return_interm_layers = args.masks
     # print(f"{args.backbone=}")
-
+    
     if "film" in args.backbone:
-        # print("Using FiLMed backbone.")
-        backbone = FilMedBackbone(args.backbone)
-        model = FiLMedJoiner(backbone, position_embedding)
+            # print("Using FiLMed backbone.")
+            backbone = FilMedBackbone(args.backbone)
+            model = FiLMedJoiner(backbone, position_embedding)
     else:
-        backbone = Backbone(
-            args.backbone, train_backbone, return_interm_layers, args.dilation
-        )
+        backbone = Backbone(args.backbone, train_backbone, return_interm_layers, args.dilation)
         model = Joiner(backbone, position_embedding)
-
+    
     model.num_channels = backbone.num_channels
     return model
 
@@ -324,13 +283,9 @@ def build_backbone(args):
 class RestNetBasicBlock(nn.Module):
     def __init__(self, in_channels, out_channels, stride):
         super(RestNetBasicBlock, self).__init__()
-        self.conv1 = nn.Conv2d(
-            in_channels, out_channels, kernel_size=3, stride=stride, padding=1
-        )
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=stride, padding=1)
         self.bn1 = nn.BatchNorm2d(out_channels)
-        self.conv2 = nn.Conv2d(
-            out_channels, out_channels, kernel_size=3, stride=stride, padding=1
-        )
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=stride, padding=1)
         self.bn2 = nn.BatchNorm2d(out_channels)
 
     def forward(self, x):
@@ -344,19 +299,13 @@ class RestNetBasicBlock(nn.Module):
 class RestNetDownBlock(nn.Module):
     def __init__(self, in_channels, out_channels, stride):
         super(RestNetDownBlock, self).__init__()
-        self.conv1 = nn.Conv2d(
-            in_channels, out_channels, kernel_size=3, stride=stride[0], padding=1
-        )
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=stride[0], padding=1)
         self.bn1 = nn.BatchNorm2d(out_channels)
-        self.conv2 = nn.Conv2d(
-            out_channels, out_channels, kernel_size=3, stride=stride[1], padding=1
-        )
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=stride[1], padding=1)
         self.bn2 = nn.BatchNorm2d(out_channels)
         self.extra = nn.Sequential(
-            nn.Conv2d(
-                in_channels, out_channels, kernel_size=1, stride=stride[0], padding=0
-            ),
-            nn.BatchNorm2d(out_channels),
+            nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride[0], padding=0),
+            nn.BatchNorm2d(out_channels)
         )
 
     def forward(self, x):
@@ -379,13 +328,11 @@ class DepthNet(nn.Module):
         # self.layer1 = nn.Sequential(RestNetBasicBlock(64, 64, 1),
         #                             RestNetBasicBlock(64, 64, 1))
 
-        self.layer2 = nn.Sequential(
-            RestNetDownBlock(64, 128, [4, 1]), RestNetBasicBlock(128, 128, 1)
-        )
+        self.layer2 = nn.Sequential(RestNetDownBlock(64, 128, [4, 1]),
+                                    RestNetBasicBlock(128, 128, 1))
 
-        self.layer3 = nn.Sequential(
-            RestNetDownBlock(128, 256, [4, 1]), RestNetBasicBlock(256, 256, 1)
-        )
+        self.layer3 = nn.Sequential(RestNetDownBlock(128, 256, [4, 1]),
+                                    RestNetBasicBlock(256, 256, 1))
         self.num_channels = 256
         # self.layer4 = nn.Sequential(RestNetDownBlock(256, 512, [2, 1]),
         #                             RestNetBasicBlock(512, 512, 1))

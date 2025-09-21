@@ -483,3 +483,15 @@ def get_cpu_mem_info():
     )
 
     return mem_total, mem_free, mem_process_used
+
+
+def get_gpu_mem_info():
+    if torch.cuda.is_available():
+        mem_total = round(
+            torch.cuda.get_device_properties(0).total_memory / 1024 / 1024, 2
+        )
+        mem_allocated = round(torch.cuda.memory_allocated(0) / 1024 / 1024, 2)
+        mem_free = mem_total - mem_allocated
+        return mem_total, mem_allocated, mem_free
+    else:
+        return 0, 0, 0

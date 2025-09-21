@@ -13,9 +13,9 @@ from collections import OrderedDict
 import sys
 
 sys.path.append("./")
+sys.path.insert(0, "/home/Xense/AC_One/act/msg/3.12")
 from robomimic.models.base_nets import ResNet18Conv, SpatialSoftmax
-from robomimic.algo.diffusion_policy import replace_bn_with_gn, ConditionalUnet1D
-
+from robomimic.algo.diffusion_policy import replace_bn_with_gn
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 from diffusers.schedulers.scheduling_ddim import DDIMScheduler
 from diffusers.training_utils import EMAModel
@@ -53,9 +53,14 @@ def reparametrize(mu, logvar):
 
 def get_sinusoid_encoding_table(n_position, d_hid):
     def get_position_angle_vec(position):
-        return [position / np.power(10000, 2 * (hid_j // 2) / d_hid) for hid_j in range(d_hid)]
+        return [
+            position / np.power(10000, 2 * (hid_j // 2) / d_hid)
+            for hid_j in range(d_hid)
+        ]
 
-    sinusoid_table = np.array([get_position_angle_vec(pos_i) for pos_i in range(n_position)])
+    sinusoid_table = np.array(
+        [get_position_angle_vec(pos_i) for pos_i in range(n_position)]
+    )
     sinusoid_table[:, 0::2] = np.sin(sinusoid_table[:, 0::2])  # dim 2i
     sinusoid_table[:, 1::2] = np.cos(sinusoid_table[:, 1::2])  # dim 2i+1
 
@@ -63,11 +68,10 @@ def get_sinusoid_encoding_table(n_position, d_hid):
 
 
 class DETRVAE(nn.Module):
-    """ This is the DETR module that performs object detection """
+    """This is the DETR module that performs object detection"""
 
     def __init__(self, backbones, depth_backbones, transformer, encoder, policy_config):
-
-        """ Initializes the model.
+        """Initializes the model.
         Parameters:
             backbones: torch module of the backbone to be used. See backbone.py
             transformer: torch module of the transformer architecture. See transformer.py
@@ -103,12 +107,16 @@ class DETRVAE(nn.Module):
             # print("backbones[0]", backbones[0])
             if depth_backbones is not None:
                 self.depth_backbones = nn.ModuleList(depth_backbones)
-                self.input_proj = nn.Conv2d(backbones[0].num_channels + depth_backbones[0].num_channels,
-                                            self.hidden_dim,
-                                            kernel_size=1)
+                self.input_proj = nn.Conv2d(
+                    backbones[0].num_channels + depth_backbones[0].num_channels,
+                    self.hidden_dim,
+                    kernel_size=1,
+                )
             else:
                 self.depth_backbones = None
-                self.input_proj = nn.Conv2d(backbones[0].num_channels, self.hidden_dim, kernel_size=1)
+                self.input_proj = nn.Conv2d(
+                    backbones[0].num_channels, self.hidden_dim, kernel_size=1
+                )
             self.backbones = nn.ModuleList(backbones)
 
         else:
@@ -120,7 +128,9 @@ class DETRVAE(nn.Module):
         self.cls_embed = nn.Embedding(1, self.hidden_dim)  # extra cls token embedding
 
         # decoder extra parameters
-        self.latent_out_proj = nn.Linear(self.latent_dim, self.hidden_dim)  # project latent sample to embedding
+        self.latent_out_proj = nn.Linear(
+            self.latent_dim, self.hidden_dim
+        )  # project latent sample to embedding
         self.latent_pos = nn.Embedding(1, self.hidden_dim)
 
         pos_embed_dim = 1
@@ -128,24 +138,51 @@ class DETRVAE(nn.Module):
 
         self.robot_state_pos = nn.Embedding(pos_embed_dim, self.hidden_dim)
 
-        self.encoder_action_proj = nn.Linear(self.action_dim, self.hidden_dim)  # project action to embedding
-        self.encoder_left_states_proj = nn.Linear(self.states_dim, self.hidden_dim)  # project qpos to embedding
-        self.encoder_right_states_proj = nn.Linear(self.states_dim, self.hidden_dim)  # project qpos to embedding
-        self.encoder_robot_base_proj = nn.Linear(3, self.hidden_dim)  # project qpos to embedding
-        self.encoder_robot_head_proj = nn.Linear(3, self.hidden_dim)  # project qpos to embedding
+        self.encoder_action_proj = nn.Linear(
+            self.action_dim, self.hidden_dim
+        )  # project action to embedding
+        self.encoder_left_states_proj = nn.Linear(
+            self.states_dim, self.hidden_dim
+        )  # project qpos to embedding
+        self.encoder_right_states_proj = nn.Linear(
+            self.states_dim, self.hidden_dim
+        )  # project qpos to embedding
+        self.encoder_robot_base_proj = nn.Linear(
+            3, self.hidden_dim
+        )  # project qpos to embedding
+        self.encoder_robot_head_proj = nn.Linear(
+            3, self.hidden_dim
+        )  # project qpos to embedding
         self.encoder_base_velocity_proj = nn.Linear(4, self.hidden_dim)
 
-        self.latent_proj = nn.Linear(self.hidden_dim, self.latent_dim * 2)  # project hidden state to latent std, var
+        self.latent_proj = nn.Linear(
+            self.hidden_dim, self.latent_dim * 2
+        )  # project hidden state to latent std, var
 
         self.encoder_addition_block_dim = 2  # cls + joints
-        self.encoder_addition_block_dim = self.encoder_addition_block_dim + 3 if self.use_base else self.encoder_addition_block_dim
+        self.encoder_addition_block_dim = (
+            self.encoder_addition_block_dim + 3
+            if self.use_base
+            else self.encoder_addition_block_dim
+        )
 
-        self.register_buffer('pos_table',
-                             get_sinusoid_encoding_table(self.encoder_addition_block_dim + self.chunk_size,
-                                                         self.hidden_dim))  # cls
+        self.register_buffer(
+            "pos_table",
+            get_sinusoid_encoding_table(
+                self.encoder_addition_block_dim + self.chunk_size, self.hidden_dim
+            ),
+        )  # cls
 
-    def encode_process(self, left_states, right_states, robot_base=None, robot_head=None, base_velocity=None,
-                       actions=None, action_is_pad=None):
+    def encode_process(
+        self,
+        left_states,
+        right_states,
+        robot_base=None,
+        robot_head=None,
+        base_velocity=None,
+        actions=None,
+        action_is_pad=None,
+    ):
 
         bs = left_states.shape[0]
         device = left_states.device
@@ -165,13 +202,18 @@ class DETRVAE(nn.Module):
             action_embed = self.encoder_action_proj(actions)
 
             # 构建除动作以外的编码器输入列表
-            embed_list = [cls_embed, project_and_unsqueeze(left_states, self.encoder_left_states_proj)]
+            embed_list = [
+                cls_embed,
+                project_and_unsqueeze(left_states, self.encoder_left_states_proj),
+            ]
 
             if self.use_base:
                 embed_list += [
                     project_and_unsqueeze(robot_base, self.encoder_robot_base_proj),
                     project_and_unsqueeze(robot_head, self.encoder_robot_head_proj),
-                    project_and_unsqueeze(base_velocity, self.encoder_base_velocity_proj),
+                    project_and_unsqueeze(
+                        base_velocity, self.encoder_base_velocity_proj
+                    ),
                 ]
 
             # 拼接最终输入：(bs, seq+X, hidden_dim) → (seq+X, bs, hidden_dim)
@@ -180,33 +222,63 @@ class DETRVAE(nn.Module):
 
             # 构建 Padding mask：(bs, seq+X)，前面非动作部分为False，后续动作部分使用action_is_pad
             num_prefix_tokens = encoder_input.size(0) - action_embed.size(1)
-            is_pad = torch.cat([
-                torch.zeros((bs, num_prefix_tokens), dtype=torch.bool, device=device),
-                action_is_pad
-            ], dim=1)
+            is_pad = torch.cat(
+                [
+                    torch.zeros(
+                        (bs, num_prefix_tokens), dtype=torch.bool, device=device
+                    ),
+                    action_is_pad,
+                ],
+                dim=1,
+            )
 
             # 位置编码：(seq+X, 1, hidden_dim)
-            pos_embed = self.pos_table[:encoder_input.size(0)].detach().permute(1, 0, 2)
+            pos_embed = (
+                self.pos_table[: encoder_input.size(0)].detach().permute(1, 0, 2)
+            )
 
             # 输入 Transformer 编码器
-            encoder_output = self.encoder(encoder_input, pos=pos_embed, src_key_padding_mask=is_pad)
+            encoder_output = self.encoder(
+                encoder_input, pos=pos_embed, src_key_padding_mask=is_pad
+            )
             cls_output = encoder_output[0]  # 取cls输出
         else:
-            latent_sample = torch.zeros([bs, self.latent_dim], dtype=torch.float32).to(left_states.device)
+            latent_sample = torch.zeros([bs, self.latent_dim], dtype=torch.float32).to(
+                left_states.device
+            )
             cls_output = self.latent_out_proj(latent_sample)
 
         latent_info = self.latent_proj(cls_output)
-        mu, logvar = latent_info[:, :self.latent_dim], latent_info[:, self.latent_dim:]
+        mu, logvar = (
+            latent_info[:, : self.latent_dim],
+            latent_info[:, self.latent_dim :],
+        )
         latent_input = self.latent_out_proj(reparametrize(mu, logvar))
 
         return latent_input, mu, logvar
 
-    def forward(self, image, depth_image, left_states, right_states, robot_base=None, robot_head=None,
-                base_velocity=None, actions=None, action_is_pad=None, command_embedding=None):
-        latent_input, mu, logvar = self.encode_process(left_states, right_states,
-                                                       robot_base=robot_base, robot_head=robot_head,
-                                                       base_velocity=base_velocity,
-                                                       actions=actions, action_is_pad=action_is_pad)
+    def forward(
+        self,
+        image,
+        depth_image,
+        left_states,
+        right_states,
+        robot_base=None,
+        robot_head=None,
+        base_velocity=None,
+        actions=None,
+        action_is_pad=None,
+        command_embedding=None,
+    ):
+        latent_input, mu, logvar = self.encode_process(
+            left_states,
+            right_states,
+            robot_base=robot_base,
+            robot_head=robot_head,
+            base_velocity=base_velocity,
+            actions=actions,
+            action_is_pad=action_is_pad,
+        )
 
         # print("forward: ", qpos.shape, image.shape, env_state, actions.shape, action_is_pad.shape)
 
@@ -218,18 +290,26 @@ class DETRVAE(nn.Module):
         all_cam_pos = []
         for cam_id, cam_name in enumerate(self.camera_names):
             # features, pos = self.backbones[0](image[:, cam_id])  # HARDCODED
-            features, img_src_pos = self.backbones[cam_id](image[:, cam_id])  # HARDCODED
+            features, img_src_pos = self.backbones[cam_id](
+                image[:, cam_id]
+            )  # HARDCODED
             features = features[0]  # take the last layer feature
             img_src_pos = img_src_pos[0]
             if self.depth_backbones is not None and depth_image is not None:
-                features_depth = self.depth_backbones[cam_id](depth_image[:, cam_id].unsqueeze(dim=1))
-                all_cam_features.append(self.input_proj(torch.cat([features, features_depth], dim=1)))
+                features_depth = self.depth_backbones[cam_id](
+                    depth_image[:, cam_id].unsqueeze(dim=1)
+                )
+                all_cam_features.append(
+                    self.input_proj(torch.cat([features, features_depth], dim=1))
+                )
             else:
                 if features.dim() == 3:  # 处理 [batch, seq_len, embed_dim] 形式
                     batch_size, seq_len, embed_dim = features.shape
                     height, width = closest_factors(seq_len)
 
-                    features = features.view(batch_size, height, width, embed_dim).permute(0, 3, 1, 2)
+                    features = features.view(
+                        batch_size, height, width, embed_dim
+                    ).permute(0, 3, 1, 2)
 
                 all_cam_features.append(self.input_proj(features))
             all_cam_pos.append(img_src_pos)
@@ -259,11 +339,20 @@ class DETRVAE(nn.Module):
 
         right_states_input = None
 
-        hs = self.transformer(self.query_embed.weight,
-                              img_src, img_src_pos, None,
-                              left_states_input, right_states_input,
-                              robot_base_input, robot_head_input, robot_velocity_input,
-                              self.robot_state_pos.weight, latent_input, self.latent_pos.weight)[0]
+        hs = self.transformer(
+            self.query_embed.weight,
+            img_src,
+            img_src_pos,
+            None,
+            left_states_input,
+            right_states_input,
+            robot_base_input,
+            robot_head_input,
+            robot_velocity_input,
+            self.robot_state_pos.weight,
+            latent_input,
+            self.latent_pos.weight,
+        )[0]
 
         a_hat = self.action_head(hs)
 
@@ -272,7 +361,7 @@ class DETRVAE(nn.Module):
 
 class CNNMLP(nn.Module):
     def __init__(self, backbones, depth_backbones, states_dim, camera_names):
-        """ Initializes the model.
+        """Initializes the model.
         Parameters:
             backbones: torch module of the backbone to be used. See backbone.py
             transformer: torch module of the transformer architecture. See transformer.py
@@ -298,17 +387,24 @@ class CNNMLP(nn.Module):
                 down_proj = nn.Sequential(
                     nn.Conv2d(num_channels, 128, kernel_size=5),
                     nn.Conv2d(128, 64, kernel_size=5),
-                    nn.Conv2d(64, 32, kernel_size=5)
+                    nn.Conv2d(64, 32, kernel_size=5),
                 )
                 backbone_down_projs.append(down_proj)
             self.backbone_down_projs = nn.ModuleList(backbone_down_projs)
 
             mlp_in_dim = 768 * len(backbones) + states_dim
-            self.mlp = mlp(input_dim=mlp_in_dim, hidden_dim=1024, output_dim=states_dim, hidden_depth=2)
+            self.mlp = mlp(
+                input_dim=mlp_in_dim,
+                hidden_dim=1024,
+                output_dim=states_dim,
+                hidden_depth=2,
+            )
         else:
             raise NotImplementedError
 
-    def forward(self, image, depth_image, robot_state, actions=None, action_is_pad=None):
+    def forward(
+        self, image, depth_image, robot_state, actions=None, action_is_pad=None
+    ):
         """
         qpos: batch, qpos_dim
         image: batch, num_cam, channel, height, width
@@ -322,8 +418,14 @@ class CNNMLP(nn.Module):
             features, pos = self.backbones[cam_id](image[:, cam_id])
             features = features[0]  # take the last layer feature
             if self.depth_backbones is not None and depth_image is not None:
-                features_depth = self.depth_backbones[cam_id](depth_image[:, cam_id].unsqueeze(dim=1))
-                all_cam_features.append(self.backbone_down_projs[cam_id](torch.cat([features, features_depth], axis=1)))
+                features_depth = self.depth_backbones[cam_id](
+                    depth_image[:, cam_id].unsqueeze(dim=1)
+                )
+                all_cam_features.append(
+                    self.backbone_down_projs[cam_id](
+                        torch.cat([features, features_depth], axis=1)
+                    )
+                )
             else:
                 all_cam_features.append(self.backbone_down_projs[cam_id](features))
         # flatten everything
@@ -338,10 +440,21 @@ class CNNMLP(nn.Module):
 
 
 class Diffusion(nn.Module):
-    def __init__(self, backbones, pools, linears, depth_backbones, states_dim, chunk_size,
-                 observation_horizon, action_horizon, num_inference_timesteps,
-                 ema_power, camera_names):
-        """ Initializes the model.
+    def __init__(
+        self,
+        backbones,
+        pools,
+        linears,
+        depth_backbones,
+        states_dim,
+        chunk_size,
+        observation_horizon,
+        action_horizon,
+        num_inference_timesteps,
+        ema_power,
+        camera_names,
+    ):
+        """Initializes the model.
         Parameters:
             backbones: torch module of the backbone to be used. See backbone.py
             transformer: torch module of the transformer architecture. See transformer.py
@@ -369,30 +482,40 @@ class Diffusion(nn.Module):
         self.num_kp = 32
         self.feature_dimension = 64
         self.ac_dim = states_dim
-        self.obs_dim = self.feature_dimension * len(self.camera_names) + states_dim  # camera features and proprio
+        self.obs_dim = (
+            self.feature_dimension * len(self.camera_names) + states_dim
+        )  # camera features and proprio
         self.noise_pred_net = ConditionalUnet1D(
             input_dim=self.states_dim,
-            global_cond_dim=self.obs_dim * self.observation_horizon
+            global_cond_dim=self.obs_dim * self.observation_horizon,
         )
         if depth_backbones is not None:
-            nets = nn.ModuleDict({
-                'policy': nn.ModuleDict({
-                    'backbones': self.backbones,
-                    'depth_backbones': self.depth_backbones,
-                    'pools': self.pools,
-                    'linears': self.linears,
-                    'noise_pred_net': self.noise_pred_net
-                })
-            })
+            nets = nn.ModuleDict(
+                {
+                    "policy": nn.ModuleDict(
+                        {
+                            "backbones": self.backbones,
+                            "depth_backbones": self.depth_backbones,
+                            "pools": self.pools,
+                            "linears": self.linears,
+                            "noise_pred_net": self.noise_pred_net,
+                        }
+                    )
+                }
+            )
         else:
-            nets = nn.ModuleDict({
-                'policy': nn.ModuleDict({
-                    'backbones': self.backbones,
-                    'pools': self.pools,
-                    'linears': self.linears,
-                    'noise_pred_net': self.noise_pred_net
-                })
-            })
+            nets = nn.ModuleDict(
+                {
+                    "policy": nn.ModuleDict(
+                        {
+                            "backbones": self.backbones,
+                            "pools": self.pools,
+                            "linears": self.linears,
+                            "noise_pred_net": self.noise_pred_net,
+                        }
+                    )
+                }
+            )
 
         nets = nets.float().cuda()
         ENABLE_EMA = False  # True
@@ -406,27 +529,31 @@ class Diffusion(nn.Module):
         # setup noise scheduler
         self.noise_scheduler = DDIMScheduler(
             num_train_timesteps=50,
-            beta_schedule='squaredcos_cap_v2',
+            beta_schedule="squaredcos_cap_v2",
             clip_sample=True,
             set_alpha_to_one=True,
             steps_offset=0,
-            prediction_type='epsilon'
+            prediction_type="epsilon",
         )
 
-    def forward(self, image, depth_image, robot_state, actions=None, action_is_pad=None):
+    def forward(
+        self, image, depth_image, robot_state, actions=None, action_is_pad=None
+    ):
         B = robot_state.shape[0]
         if actions is not None:  # training time
             nets = self.nets
             all_features = []
             for cam_id in range(len(self.camera_names)):
                 cam_image = image[:, cam_id]
-                cam_features = nets['policy']['backbones'][cam_id](cam_image)
+                cam_features = nets["policy"]["backbones"][cam_id](cam_image)
                 if depth_image is not None:
-                    features_depth = self.depth_backbones[cam_id](depth_image[:, cam_id].unsqueeze(dim=1))
+                    features_depth = self.depth_backbones[cam_id](
+                        depth_image[:, cam_id].unsqueeze(dim=1)
+                    )
                     cam_features = torch.cat([cam_features, features_depth], axis=1)
-                pool_features = nets['policy']['pools'][cam_id](cam_features)
+                pool_features = nets["policy"]["pools"][cam_id](cam_features)
                 pool_features = torch.flatten(pool_features, start_dim=1)
-                out_features = nets['policy']['linears'][cam_id](pool_features)
+                out_features = nets["policy"]["linears"][cam_id](pool_features)
                 all_features.append(out_features)
             obs_cond = torch.cat(all_features + [robot_state], dim=1)
 
@@ -434,14 +561,18 @@ class Diffusion(nn.Module):
             noise = torch.randn(actions.shape, device=obs_cond.device)
             # sample a diffusion iteration for each data point
             timesteps = torch.randint(
-                0, self.noise_scheduler.config.num_train_timesteps,
-                (B,), device=obs_cond.device
+                0,
+                self.noise_scheduler.config.num_train_timesteps,
+                (B,),
+                device=obs_cond.device,
             ).long()
             # add noise to the clean actions according to the noise magnitude at each diffusion iteration
             # (this is the forward diffusion process)
             noisy_actions = self.noise_scheduler.add_noise(actions, noise, timesteps)
             # predict the noise residual
-            noise_pred = nets['policy']['noise_pred_net'](noisy_actions, timesteps, global_cond=obs_cond)
+            noise_pred = nets["policy"]["noise_pred_net"](
+                noisy_actions, timesteps, global_cond=obs_cond
+            )
             if self.ema is not None:
                 self.ema.step(nets)
             return noise, noise_pred
@@ -457,34 +588,31 @@ class Diffusion(nn.Module):
             all_features = []
             for cam_id in range(len(self.camera_names)):
                 cam_image = image[:, cam_id]
-                cam_features = nets['policy']['backbones'][cam_id](cam_image)
+                cam_features = nets["policy"]["backbones"][cam_id](cam_image)
                 if depth_image is not None:
-                    features_depth = self.depth_backbones[cam_id](depth_image[:, cam_id].unsqueeze(dim=1))
+                    features_depth = self.depth_backbones[cam_id](
+                        depth_image[:, cam_id].unsqueeze(dim=1)
+                    )
                     cam_features = torch.cat([cam_features, features_depth], axis=1)
-                pool_features = nets['policy']['pools'][cam_id](cam_features)
+                pool_features = nets["policy"]["pools"][cam_id](cam_features)
                 pool_features = torch.flatten(pool_features, start_dim=1)
-                out_features = nets['policy']['linears'][cam_id](pool_features)
+                out_features = nets["policy"]["linears"][cam_id](pool_features)
                 all_features.append(out_features)
             obs_cond = torch.cat(all_features + [robot_state], dim=1)
 
             # initialize action from Guassian noise
-            noisy_action = torch.randn(
-                (B, Tp, self.states_dim), device=obs_cond.device)
+            noisy_action = torch.randn((B, Tp, self.states_dim), device=obs_cond.device)
             naction = noisy_action
             # init scheduler
             self.noise_scheduler.set_timesteps(self.num_inference_timesteps)
             for k in self.noise_scheduler.timesteps:
                 # predict noise
-                noise_pred = nets['policy']['noise_pred_net'](
-                    sample=naction,
-                    timestep=k,
-                    global_cond=obs_cond
+                noise_pred = nets["policy"]["noise_pred_net"](
+                    sample=naction, timestep=k, global_cond=obs_cond
                 )
                 # inverse diffusion step (remove noise)
                 naction = self.noise_scheduler.step(
-                    model_output=noise_pred,
-                    timestep=k,
-                    sample=naction
+                    model_output=noise_pred, timestep=k, sample=naction
                 ).prev_sample
 
             return naction
@@ -492,14 +620,16 @@ class Diffusion(nn.Module):
     def serialize(self):
         return {
             "nets": self.nets.state_dict(),
-            "ema": self.ema.averaged_model.state_dict() if self.ema is not None else None,
+            "ema": (
+                self.ema.averaged_model.state_dict() if self.ema is not None else None
+            ),
         }
 
     def deserialize(self, model_dict):
         status = self.nets.load_state_dict(model_dict["nets"])
-        print('Loaded model')
+        print("Loaded model")
         if model_dict.get("ema", None) is not None:
-            print('Loaded EMA')
+            print("Loaded EMA")
             status_ema = self.ema.averaged_model.load_state_dict(model_dict["ema"])
             status = [status, status_ema]
         return status
@@ -517,15 +647,28 @@ def build_diffusion(args):
         depth_backbones = []
 
     for _ in args.camera_names:
-        backbones.append(ResNet18Conv(**{'input_channel': 3, 'pretrained': False, 'input_coord_conv': False}))
+        backbones.append(
+            ResNet18Conv(
+                **{"input_channel": 3, "pretrained": False, "input_coord_conv": False}
+            )
+        )
         num_channels = 512
 
         if args.use_depth_image:
             depth_backbones.append(DepthNet())
             num_channels += depth_backbones[-1].num_channels
 
-        pools.append(SpatialSoftmax(**{'input_shape': [num_channels, 15, 20], 'num_kp': 32, 'temperature': 1.0,
-                                       'learnable_temperature': False, 'noise_std': 0.0}))
+        pools.append(
+            SpatialSoftmax(
+                **{
+                    "input_shape": [num_channels, 15, 20],
+                    "num_kp": 32,
+                    "temperature": 1.0,
+                    "learnable_temperature": False,
+                    "noise_std": 0.0,
+                }
+            )
+        )
         linears.append(torch.nn.Linear(int(np.prod([32, 2])), 64))
 
     model = Diffusion(
@@ -568,8 +711,9 @@ def build_encoder(args):
     normalize_before = args.pre_norm  # False
     activation = "relu"
 
-    encoder_layer = TransformerEncoderLayer(d_model, nhead, dim_feedforward,
-                                            dropout, activation, normalize_before)
+    encoder_layer = TransformerEncoderLayer(
+        d_model, nhead, dim_feedforward, dropout, activation, normalize_before
+    )
 
     encoder_norm = nn.LayerNorm(d_model) if normalize_before else None
 
