@@ -184,3 +184,16 @@ venv.bak/
 
 # PDF files
 *.pdf
+
+# Log files
+*.log
+logs/
+log/
+*.log.*
+
+# log4z generated logs
+*.lgz
+*.txt.log
+*_log.txt
+log4z/
+zsummer_log/
