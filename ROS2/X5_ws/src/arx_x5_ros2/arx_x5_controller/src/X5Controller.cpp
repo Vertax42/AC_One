@@ -241,10 +241,13 @@ void X5Controller::FollowCmdCallback(const arx5_arm_msg::msg::RobotStatus::Share
 
 void X5Controller::EefCmdCallback(const arm_control::msg::PosCmd::SharedPtr msg) {
   RCLCPP_DEBUG(this->get_logger(), "Received end-effector command");
-  
+  if (current_state_ == InterfacesThread::state::POSITION_CONTROL) {
+    RCLCPP_WARN(this->get_logger(), "EefCmdCallback: Robot is now in %s mode, switching to END_CONTROL mode first...", getCurrentStateString().c_str());
+    SetRobotState(InterfacesThread::state::END_CONTROL);
+  }
   // Check if robot is in appropriate state for end-effector control
   if (current_state_ != InterfacesThread::state::END_CONTROL) {
-    RCLCPP_WARN(this->get_logger(), "EefCmdCallback Disabled: Robot is now in %s mode, skipping end-effector control command...", getCurrentStateString().c_str());
+    RCLCPP_WARN(this->get_logger(), "EefCmdCallback: Robot is now in %s mode, skipping end-effector control command...", getCurrentStateString().c_str());
     return;
   }
   

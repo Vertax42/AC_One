@@ -26,8 +26,7 @@ PicoXRNode::PicoXRNode() : Node("pico_xr_node")
         "/pico_xr/right_controller/joy", 10);
     
     // Publisher for headset
-    headset_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(
-        "/pico_xr/headset/pose", 10);
+    headset_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("/pico_xr/headset/pose", 10);
     
     // Initialize controller data
     left_controller_pose_.fill(0.0);
@@ -57,7 +56,7 @@ PicoXRNode::PicoXRNode() : Node("pico_xr_node")
     
     // Create timer to publish data
     timer_ = this->create_wall_timer(
-        std::chrono::milliseconds(10),  // 100Hz
+        std::chrono::milliseconds(5),  // 200Hz
         std::bind(&PicoXRNode::publish_data, this));
         
     // Start background thread for status monitoring
@@ -385,7 +384,7 @@ void PicoXRNode::status_monitor_loop()
             last_status_log = now;
         }
         
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        std::this_thread::sleep_for(std::chrono::milliseconds(2000));
     }
 }
 
@@ -408,7 +407,7 @@ int main(int argc, char* argv[])
     
     // Initialize log4z system
     zsummer::log4z::ILog4zManager::getRef().start();
-    zsummer::log4z::ILog4zManager::getRef().setLoggerLevel(LOG4Z_MAIN_LOGGER_ID, LOG_LEVEL_DEBUG);
+    zsummer::log4z::ILog4zManager::getRef().setLoggerLevel(LOG4Z_MAIN_LOGGER_ID, LOG_LEVEL_INFO);
     
     // 设置日志立即输出，不缓冲
     zsummer::log4z::ILog4zManager::getRef().setLoggerDisplay(LOG4Z_MAIN_LOGGER_ID, true);

@@ -4,7 +4,8 @@
 #include <rclcpp/rclcpp.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <sensor_msgs/msg/joy.hpp>
-#include <pico_xr_teleop/msg/pos_cmd.hpp>
+#include <arm_control/msg/pos_cmd.hpp>
+#include <arx5_arm_msg/msg/robot_status.hpp>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <Eigen/Geometry>
@@ -27,14 +28,18 @@ public:
 
 private:
     // Publishers for arm commands - 发送给X5Controller
-    rclcpp::Publisher<pico_xr_teleop::msg::PosCmd>::SharedPtr left_arm_cmd_pub_;
-    rclcpp::Publisher<pico_xr_teleop::msg::PosCmd>::SharedPtr right_arm_cmd_pub_;
+    rclcpp::Publisher<arm_control::msg::PosCmd>::SharedPtr left_arm_cmd_pub_;
+    rclcpp::Publisher<arm_control::msg::PosCmd>::SharedPtr right_arm_cmd_pub_;
     
     // Subscribers for Pico XR controller data
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr left_pose_sub_;
     rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr left_joy_sub_;
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr right_pose_sub_;
     rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr right_joy_sub_;
+    
+    // Subscribers for robot arm status
+    rclcpp::Subscription<arx5_arm_msg::msg::RobotStatus>::SharedPtr left_arm_status_sub_;
+    rclcpp::Subscription<arx5_arm_msg::msg::RobotStatus>::SharedPtr right_arm_status_sub_;
     
     // Timer for control loop
     rclcpp::TimerBase::SharedPtr timer_;
@@ -58,13 +63,29 @@ private:
     std::vector<double> left_target_pose_{0, 0, 0, 0, 0, 0};
     std::vector<double> right_target_pose_{0, 0, 0, 0, 0, 0};
     
+    // Current robot arm poses (from robot status)
+    std::vector<double> left_current_robot_pose_{0, 0, 0, 0, 0, 0};
+    std::vector<double> right_current_robot_pose_{0, 0, 0, 0, 0, 0};
+    bool left_robot_status_received_{false};
+    bool right_robot_status_received_{false};
+    
     std::mutex left_mutex_;
     std::mutex right_mutex_;
+    std::mutex left_robot_mutex_;
+    std::mutex right_robot_mutex_;
     
     // Parameters
     double position_scale_;
     double rotation_scale_;
     double control_frequency_;
+    double pose_safety_threshold_{0.3}; // 0.3弧度 ≈ 17.2度
+    double rpy_range_limit_{1.57}; // ±1.57弧度 ≈ ±90度
+    double deadband_threshold_{0.005}; // 死区阈值：5mm位置 + 0.005弧度角度
+    
+    
+    // Safety status display control
+    int safety_status_counter_{0};
+    int safety_status_display_interval_{100}; // 每1秒显示一次 (100/100Hz = 1s)
     
     /**
      * @brief 左控制器pose回调
@@ -89,6 +110,18 @@ private:
      * @param msg Joy消息
      */
     void right_joy_callback(const sensor_msgs::msg::Joy::SharedPtr msg);
+    
+    /**
+     * @brief 左臂状态回调
+     * @param msg RobotStatus消息
+     */
+    void left_arm_status_callback(const arx5_arm_msg::msg::RobotStatus::SharedPtr msg);
+    
+    /**
+     * @brief 右臂状态回调
+     * @param msg RobotStatus消息
+     */
+    void right_arm_status_callback(const arx5_arm_msg::msg::RobotStatus::SharedPtr msg);
     
     /**
      * @brief 主控制循环
@@ -169,6 +202,27 @@ private:
      * @return 旋转向量
      */
     std::array<double, 3> euler_to_rotation_vector(const Eigen::Vector3d& eigen_euler);
+    
+    /**
+     * @brief 检查VR控制器姿态与机械臂当前姿态的差异是否安全
+     * @param vr_pose VR控制器转换后的ARX5姿态 [x,y,z,roll,pitch,yaw]
+     * @param robot_pose 机械臂当前姿态 [x,y,z,roll,pitch,yaw]
+     * @return 是否安全 (RPY角度差异都小于阈值)
+     */
+    bool is_pose_difference_safe(const std::vector<double>& vr_pose, const std::vector<double>& robot_pose);
+    
+    /**
+     * @brief 检查RPY角度是否在安全范围内
+     * @param pose 姿态 [x,y,z,roll,pitch,yaw]
+     * @return 是否在安全范围内 (RPY角度都在±1.57弧度范围内)
+     */
+    bool is_rpy_in_safe_range(const std::vector<double>& pose);
+    
+    /**
+     * @brief 检查并显示当前安全状态，提示用户何时可以按下grip按键
+     */
+    void check_and_display_safety_status();
+    
 };
 
 } // namespace pico_xr_teleop

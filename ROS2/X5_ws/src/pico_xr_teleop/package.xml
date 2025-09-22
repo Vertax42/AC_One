@@ -15,9 +15,9 @@
   <depend>std_msgs</depend>
   <depend>tf2</depend>
   <depend>tf2_geometry_msgs</depend>
+  <depend>arx5_arm_msg</depend>
+  <depend>arm_control</depend>
   
-  <build_depend>rosidl_default_generators</build_depend>
-  <exec_depend>rosidl_default_runtime</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
@@ -26,5 +26,4 @@
     <build_type>ament_cmake</build_type>
   </export>
 
-  <member_of_group>rosidl_interface_packages</member_of_group>
 </package>
