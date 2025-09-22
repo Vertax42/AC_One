@@ -105,6 +105,7 @@ void PicoXRTeleopNode::control_left_arm()
     double current_grip = left_grip_.load();
     bool is_grip_pressed = current_grip > 0.9; // 参考main.cpp的阈值
     
+    // 优化：减少锁的持有时间，直接拷贝数据
     std::array<double, 7> current_pose;
     {
         std::lock_guard<std::mutex> lock(left_mutex_);
@@ -229,51 +230,38 @@ std::vector<double> PicoXRTeleopNode::convert_controller_to_arx5_pose_left(const
 {
     std::vector<double> arx5_pose(6);
     
-    // 坐标系映射关系:
-    // ARX5: X(前/后), Y(左/右), Z(上/下)  
-    // VR:   X(右/左), Y(上/下), Z(后/前)
-    // 
-    // 映射关系:
-    // ARX5_X ← -VR_Z (前/后，VR的Z负方向对应ARX5的X正方向)
-    // ARX5_Y ← -VR_X (左/右，VR的X负方向对应ARX5的Y正方向)  
-    // ARX5_Z ←  VR_Y (上/下，VR的Y正方向对应ARX5的Z正方向)
+    // 位置转换 - 优化：直接计算，避免重复乘法
+    const double pos_scale = position_scale_;
+    arx5_pose[0] = -controller_pose[2] * pos_scale;  // X: 前/后
+    arx5_pose[1] = -controller_pose[0] * pos_scale;  // Y: 左/右
+    arx5_pose[2] =  controller_pose[1] * pos_scale;  // Z: 上/下
     
-    arx5_pose[0] = -controller_pose[2] * position_scale_;  // X: 前/后
-    arx5_pose[1] = -controller_pose[0] * position_scale_;  // Y: 左/右
-    arx5_pose[2] =  controller_pose[1] * position_scale_;  // Z: 上/下
+    // 姿态转换 - 优化：直接使用四元数分量，避免创建Eigen对象
+    const double w = controller_pose[6];
+    const double x = controller_pose[3];
+    const double y = controller_pose[4];
+    const double z = controller_pose[5];
     
-    // 姿态转换 - 使用标准的四元数到RPY转换
-    // 创建控制器四元数
-    Eigen::Quaterniond q_controller(controller_pose[6], controller_pose[3], controller_pose[4], controller_pose[5]);
+    // 预计算常用的平方项，减少重复计算
+    const double x2 = x * x;
+    const double y2 = y * y;
+    const double z2 = z * z;
     
-    // 标准的四元数到RPY转换（ZYX外在旋转，即Roll-Pitch-Yaw）
-    double w = q_controller.w();
-    double x = q_controller.x();
-    double y = q_controller.y();
-    double z = q_controller.z();
+    // Roll (绕X轴旋转) - 优化：减少乘法运算
+    const double vr_roll = std::atan2(2.0 * (w * x + y * z), 1.0 - 2.0 * (x2 + y2));
     
-    // Roll (绕X轴旋转)
-    double vr_roll = std::atan2(2.0 * (w * x + y * z), 1.0 - 2.0 * (x * x + y * y));
+    // Pitch (绕Y轴旋转) - 优化：直接计算sinp
+    const double sinp = 2.0 * (w * y - z * x);
+    const double vr_pitch = (std::abs(sinp) >= 1.0) ? 
+        M_PI / 2.0 * ((sinp > 0) ? 1.0 : -1.0) : std::asin(sinp);
     
-    // Pitch (绕Y轴旋转) - 添加奇点保护
-    double sinp = 2.0 * (w * y - z * x);
-    double vr_pitch;
-    if (std::abs(sinp) >= 1.0) {
-        vr_pitch = M_PI / 2.0 * ((sinp > 0) ? 1.0 : -1.0);  // 使用 90 度限制
-            } else {
-        vr_pitch = std::asin(sinp);
-    }
+    // Yaw (绕Z轴旋转) - 优化：复用预计算的平方项
+    const double vr_yaw = std::atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y2 + z2));
     
-    // Yaw (绕Z轴旋转)
-    double vr_yaw = std::atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z));
-    
-    // 根据坐标轴映射关系进行RPY映射：
-    // ARX5_X ← -VR_Z  =>  ARX5_Roll  ← -VR_Yaw
-    // ARX5_Y ← -VR_X  =>  ARX5_Pitch ← -VR_Roll  
-    // ARX5_Z ←  VR_Y  =>  ARX5_Yaw   ←  VR_Pitch
-    arx5_pose[3] = -vr_yaw;   // Roll:  ARX5绕X轴 ← -VR绕Z轴(Yaw)
-    arx5_pose[4] = -vr_roll;  // Pitch: ARX5绕Y轴 ← -VR绕X轴(Roll)
-    arx5_pose[5] =  vr_pitch; // Yaw:   ARX5绕Z轴 ←  VR绕Y轴(Pitch)
+    // RPY映射 - 优化：直接赋值，避免中间变量
+    arx5_pose[3] = -vr_yaw;   // Roll
+    arx5_pose[4] = -vr_roll;  // Pitch
+    arx5_pose[5] =  vr_pitch; // Yaw
     
     return arx5_pose;
 }
@@ -283,51 +271,38 @@ std::vector<double> PicoXRTeleopNode::convert_controller_to_arx5_pose_right(cons
 {
     std::vector<double> arx5_pose(6);
     
-    // 右臂使用与左臂相同的坐标映射关系
-    // ARX5: X(前/后), Y(左/右), Z(上/下)  
-    // VR:   X(右/左), Y(上/下), Z(后/前)
-    // 
-    // 映射关系:
-    // ARX5_X ← -VR_Z (前/后，VR的Z负方向对应ARX5的X正方向)
-    // ARX5_Y ← -VR_X (左/右，VR的X负方向对应ARX5的Y正方向)  
-    // ARX5_Z ←  VR_Y (上/下，VR的Y正方向对应ARX5的Z正方向)
+    // 位置转换 - 优化：直接计算，避免重复乘法
+    const double pos_scale = position_scale_;
+    arx5_pose[0] = -controller_pose[2] * pos_scale;  // X: 前/后
+    arx5_pose[1] = -controller_pose[0] * pos_scale;  // Y: 左/右
+    arx5_pose[2] =  controller_pose[1] * pos_scale;  // Z: 上/下
     
-    arx5_pose[0] = -controller_pose[2] * position_scale_;  // X: 前/后
-    arx5_pose[1] = -controller_pose[0] * position_scale_;  // Y: 左/右
-    arx5_pose[2] =  controller_pose[1] * position_scale_;  // Z: 上/下
+    // 姿态转换 - 优化：直接使用四元数分量，避免创建Eigen对象
+    const double w = controller_pose[6];
+    const double x = controller_pose[3];
+    const double y = controller_pose[4];
+    const double z = controller_pose[5];
     
-    // 姿态转换 - 使用标准的四元数到RPY转换
-    // 创建控制器四元数
-    Eigen::Quaterniond q_controller(controller_pose[6], controller_pose[3], controller_pose[4], controller_pose[5]);
+    // 预计算常用的平方项，减少重复计算
+    const double x2 = x * x;
+    const double y2 = y * y;
+    const double z2 = z * z;
     
-    // 标准的四元数到RPY转换（ZYX外在旋转，即Roll-Pitch-Yaw）
-    double w = q_controller.w();
-    double x = q_controller.x();
-    double y = q_controller.y();
-    double z = q_controller.z();
+    // Roll (绕X轴旋转) - 优化：减少乘法运算
+    const double vr_roll = std::atan2(2.0 * (w * x + y * z), 1.0 - 2.0 * (x2 + y2));
     
-    // Roll (绕X轴旋转)
-    double vr_roll = std::atan2(2.0 * (w * x + y * z), 1.0 - 2.0 * (x * x + y * y));
+    // Pitch (绕Y轴旋转) - 优化：直接计算sinp
+    const double sinp = 2.0 * (w * y - z * x);
+    const double vr_pitch = (std::abs(sinp) >= 1.0) ? 
+        M_PI / 2.0 * ((sinp > 0) ? 1.0 : -1.0) : std::asin(sinp);
     
-    // Pitch (绕Y轴旋转) - 添加奇点保护
-    double sinp = 2.0 * (w * y - z * x);
-    double vr_pitch;
-    if (std::abs(sinp) >= 1.0) {
-        vr_pitch = M_PI / 2.0 * ((sinp > 0) ? 1.0 : -1.0);  // 使用 90 度限制
-    } else {
-        vr_pitch = std::asin(sinp);
-    }
+    // Yaw (绕Z轴旋转) - 优化：复用预计算的平方项
+    const double vr_yaw = std::atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y2 + z2));
     
-    // Yaw (绕Z轴旋转)
-    double vr_yaw = std::atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z));
-    
-    // 根据坐标轴映射关系进行RPY映射：
-    // ARX5_X ← -VR_Z  =>  ARX5_Roll  ← -VR_Yaw
-    // ARX5_Y ← -VR_X  =>  ARX5_Pitch ← -VR_Roll  
-    // ARX5_Z ←  VR_Y  =>  ARX5_Yaw   ←  VR_Pitch
-    arx5_pose[3] = -vr_yaw;   // Roll:  ARX5绕X轴 ← -VR绕Z轴(Yaw)
-    arx5_pose[4] = -vr_roll;  // Pitch: ARX5绕Y轴 ← -VR绕X轴(Roll)
-    arx5_pose[5] =  vr_pitch; // Yaw:   ARX5绕Z轴 ←  VR绕Y轴(Pitch)
+    // RPY映射 - 优化：直接赋值，避免中间变量
+    arx5_pose[3] = -vr_yaw;   // Roll
+    arx5_pose[4] = -vr_roll;  // Pitch
+    arx5_pose[5] =  vr_pitch; // Yaw
     
     return arx5_pose;
 }
@@ -428,7 +403,7 @@ void PicoXRTeleopNode::send_left_arm_command()
     
     // 日志输出
     static int left_counter = 0;
-    if (left_counter++ % 50 == 0) { // 每0.5秒输出一次 (50/100Hz = 0.5s)
+    if (left_counter++ % 200 == 0) { // 每2秒输出一次 (200/100Hz = 2s) - 优化：减少日志频率
         RCLCPP_INFO(this->get_logger(), "⬅️ Left arm: pos[%.3f,%.3f,%.3f] rot[%.3f,%.3f,%.3f] grip=%.3f",
                    cmd.x, cmd.y, cmd.z, cmd.roll, cmd.pitch, cmd.yaw, cmd.gripper);
     }
@@ -454,7 +429,7 @@ void PicoXRTeleopNode::send_right_arm_command()
     right_arm_cmd_pub_->publish(cmd);
     
     static int right_counter = 0;
-    if (right_counter++ % 50 == 0) { // 每0.5秒输出一次 (50/100Hz = 0.5s)
+    if (right_counter++ % 200 == 0) { // 每2秒输出一次 (200/100Hz = 2s) - 优化：减少日志频率
         RCLCPP_INFO(this->get_logger(), "➡️ Right arm: pos[%.3f,%.3f,%.3f] rot[%.3f,%.3f,%.3f] grip=%.3f",
                    cmd.x, cmd.y, cmd.z, cmd.roll, cmd.pitch, cmd.yaw, cmd.gripper);
     }

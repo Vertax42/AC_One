@@ -36,9 +36,9 @@ joint_cur: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 # *Dangerous* eef controller ros2 topic command cli
 # gripper pos[0, 1] -> actual =[0, -3.4]
 ros2 topic pub /left_eef_cmd arm_control/msg/PosCmd "
-x: 0.2
-y: 0.0
-z: 0.2
+x: 0.0
+y: 0.1
+z: 0.1
 roll: 0.0
 pitch: 0.0
 yaw: 0.0

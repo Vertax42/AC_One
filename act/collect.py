@@ -23,6 +23,7 @@ import yaml
 import threading
 import pyttsx3
 import signal
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
@@ -79,6 +80,21 @@ def voice_process(voice_engine, line):
     return
 
 
+def voice_process_async(voice_engine, line):
+    """异步语音播放，不阻塞主线程"""
+
+    def _play_voice():
+        with voice_lock:
+            voice_engine.say(line)
+            voice_engine.runAndWait()
+            print(f"🔊 Voice played: {line}")
+
+    # 使用线程池执行语音播放
+    voice_executor = ThreadPoolExecutor(max_workers=1)
+    voice_executor.submit(_play_voice)
+    return voice_executor
+
+
 def collect_detect(args, start_episode, voice_engine, ros_operator):
     global init_pos
 
@@ -120,9 +136,10 @@ def collect_detect(args, start_episode, voice_engine, ros_operator):
                 init_done = True
                 # 使用机器人按下按钮时的实际位置作为初始位置
                 init_pos = action.copy()  # 记录当前实际的关节位置
-                print(f"Recorded initial position: {init_pos}")
-                # 立即开始记录数据，不等待同步
-                print("Button pressed - starting immediate data collection...")
+                print(
+                    f"✅ Button pressed! Initial position recorded: {init_pos[:7]}"
+                )  # 只显示前7个关节
+                print("🚀 Starting immediate data collection...")
             if 2 in triggered:
                 delete_idx = start_episode - 1
 
@@ -130,7 +147,7 @@ def collect_detect(args, start_episode, voice_engine, ros_operator):
                 if os.path.exists(episode_path):
                     os.remove(episode_path)
 
-                    voice_process(voice_engine, f"delete {delete_idx}")
+                    voice_process_async(voice_engine, f"delete {delete_idx}")
 
             if init_done:
                 pass
@@ -156,36 +173,42 @@ def collect_information(args, ros_operator, voice_engine, episode_number):
     # gripper_idx = [6, 13]
     # gripper_close = -2.1
 
-    # 立即开始记录数据，确保第一帧就是按下0键时的位置
-    print("Starting data recording immediately...")
-    first_frame_recorded = False
+    # 修复轨迹连续性：使用按钮按下时的位置作为第一帧
+    global init_pos
+    print("🎯 Recording first frame using button-press position for continuity...")
 
-    # 立即尝试获取第一帧数据，不等待
-    print("Attempting to record first frame immediately...")
-    while not first_frame_recorded and rclpy.ok():
-        obs_dict = ros_operator.get_observation(ts=count)
-        action_dict = ros_operator.get_action()
+    # 获取当前观测数据
+    obs_dict = ros_operator.get_observation(ts=0)
+    if obs_dict is not None:
+        # 第一帧：使用按钮按下时记录的位置作为动作（确保连续性）
+        action = init_pos.copy()
+        action_eef = deepcopy(obs_dict["eef"])  # EEF使用当前观测
 
-        if obs_dict is not None and action_dict is not None:
-            # 立即记录第一帧
-            action = deepcopy(obs_dict["qpos"])
-            action_eef = deepcopy(obs_dict["eef"])
-            # 收集数据
-            timesteps.append(obs_dict)
-            actions.append(action)
-            actions_eef.append(action_eef)
+        timesteps.append(obs_dict)
+        actions.append(action)
+        actions_eef.append(action_eef)
+        count = 1
 
-            count += 1
-            first_frame_recorded = True
-            print(f"First frame recorded immediately at position: {action}")
-            print("Data recording started successfully!")
+        print(f"✅ Frame 0 - Button position: {action[:7]}")
+        print(f"📊 Frame 0 - Current observation: {obs_dict['qpos'][:7]}")
 
-            # 在记录第一帧后立即播放语音提示
-            voice_process(voice_engine, f"{episode_number % 100}")
-            voice_process(voice_engine, "go")
-        else:
-            print("Waiting for first frame data...")
-        rate.sleep()
+        # 计算位置差异，检查是否有跳跃
+        pos_diff = np.array(obs_dict["qpos"]) - np.array(action)
+        max_diff = np.max(np.abs(pos_diff))
+        print(f"📈 Position difference: max={max_diff:.4f}, diff={pos_diff[:7]}")
+
+        if max_diff > 0.1:
+            print(f"⚠️ WARNING: Large position jump detected ({max_diff:.4f} rad)!")
+            print(
+                "   This suggests robot moved between button press and data collection."
+            )
+
+        # 播放语音提示（异步，不阻塞数据采集）
+        voice_process_async(voice_engine, f"{episode_number % 100}")
+        voice_process_async(voice_engine, "go")
+    else:
+        print("❌ Failed to get initial observation!")
+        return timesteps, actions, actions_eef
 
     while (count < args.max_timesteps) and rclpy.ok():
         obs_dict = ros_operator.get_observation(ts=count)
@@ -226,6 +249,20 @@ def collect_information(args, ros_operator, voice_engine, episode_number):
                 # 如果偏离了初始位置，重置计时器
                 if return_home_start_time is not None:
                     return_home_start_time = None
+
+        # 轨迹连续性检查（从第二帧开始）
+        if count > 0 and len(actions) > 0:
+            prev_action = actions[-1]
+            action_diff = np.array(action) - np.array(prev_action)
+            max_diff = np.max(np.abs(action_diff))
+
+            if max_diff > 0.2:  # 超过0.2弧度的跳跃
+                print(
+                    f"⚠️ Frame {count}: Large trajectory jump detected! Max diff: {max_diff:.4f}"
+                )
+                print(f"   Previous: {prev_action[:7]}")
+                print(f"   Current:  {action[:7]}")
+                print(f"   Diff:     {action_diff[:7]}")
 
         # 收集数据
         timesteps.append(obs_dict)
@@ -387,7 +424,7 @@ def save_data(
         args, data_dict, dataset_path, data_size, padded_size, padded_size_depth
     )
 
-    voice_process(voice_engine, "Save")
+    voice_process_async(voice_engine, "Save")
     print(f"\033[32m\nSaved in {time.time() - t0:.1f}s: {dataset_path}\033[0m\n")
 
     return
