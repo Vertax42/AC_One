@@ -3,8 +3,11 @@ import torch.nn as nn
 from torch.nn import functional as F
 import torchvision.transforms as transforms
 import torchvision.transforms.functional as TF
-from detr.main import build_ACT_model_and_optimizer, build_CNNMLP_model_and_optimizer, \
-    build_diffusion_model_and_optimizer
+from detr.main import (
+    build_ACT_model_and_optimizer,
+    build_CNNMLP_model_and_optimizer,
+    build_diffusion_model_and_optimizer,
+)
 
 import IPython
 
@@ -20,17 +23,29 @@ class ACTPolicy(nn.Module):
 
         self.model = model  # CVAE decoder
         self.optimizer = optimizer
-        self.kl_weight = args_override['kl_weight']
-        self.loss_function = args_override['loss_function']
+        self.kl_weight = args_override["kl_weight"]
+        self.loss_function = args_override["loss_function"]
 
         # print(f'KL Weight {self.kl_weight}')
 
-        self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                              std=[0.229, 0.224, 0.225])
+        self.normalize = transforms.Normalize(
+            mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+        )
         self.depth_normalize = transforms.Normalize(mean=[0.5], std=[0.5])
 
-    def __call__(self, image, depth_image, left_states, right_states, robot_base=None, robot_head=None,
-                 base_velocity=None, actions=None, action_is_pad=None, command_embedding=None):
+    def __call__(
+        self,
+        image,
+        depth_image,
+        left_states,
+        right_states,
+        robot_base=None,
+        robot_head=None,
+        base_velocity=None,
+        actions=None,
+        action_is_pad=None,
+        command_embedding=None,
+    ):
 
         image = self.normalize(image)  # 图像归一化
 
@@ -39,33 +54,51 @@ class ACTPolicy(nn.Module):
 
         # 总共max个步 只取前model.chunk_size个
         if actions is not None:  # training time
-            a_hat, (mu, logvar) = self.model(image, depth_image, left_states, right_states, robot_base=robot_base,
-                                             robot_head=robot_head, base_velocity=base_velocity,
-                                             actions=actions, action_is_pad=action_is_pad)
+            a_hat, latent_info = self.model(
+                image,
+                depth_image,
+                left_states,
+                right_states,
+                robot_base=robot_base,
+                robot_head=robot_head,
+                base_velocity=base_velocity,
+                actions=actions,
+                action_is_pad=action_is_pad,
+            )
+            mu, logvar = latent_info
 
             loss_dict = dict()
-            if self.loss_function == 'l1':
-                all_l1 = F.l1_loss(actions, a_hat, reduction='none')
-            elif self.loss_function == 'l2':
-                all_l1 = F.mse_loss(actions, a_hat, reduction='none')
+            if self.loss_function == "l1":
+                all_l1 = F.l1_loss(actions, a_hat, reduction="none")
+            elif self.loss_function == "l2":
+                all_l1 = F.mse_loss(actions, a_hat, reduction="none")
             else:
-                all_l1 = F.smooth_l1_loss(actions, a_hat, reduction='none')
+                all_l1 = F.smooth_l1_loss(actions, a_hat, reduction="none")
 
             l1 = (all_l1 * ~action_is_pad.unsqueeze(-1)).mean()
 
-            loss_dict['l1'] = l1
+            loss_dict["l1"] = l1
             if self.kl_weight != 0:
                 total_kld, dim_wise_kld, mean_kld = kl_divergence(mu, logvar)
-                loss_dict['kl'] = total_kld[0]
-                loss_dict['loss'] = loss_dict['l1'] + loss_dict['kl'] * self.kl_weight  # * 0.5 #
+                loss_dict["kl"] = total_kld[0]
+                loss_dict["loss"] = (
+                    loss_dict["l1"] + loss_dict["kl"] * self.kl_weight
+                )  # * 0.5 #
             else:
-                loss_dict['loss'] = loss_dict['l1']
+                loss_dict["loss"] = loss_dict["l1"]
 
             return loss_dict, a_hat
         else:  # inference time
-            a_hat, image_feature = self.model(image, depth_image, left_states, right_states,
-                                              robot_base=robot_base, robot_head=robot_head, base_velocity=base_velocity,
-                                              command_embedding=None)
+            a_hat, latent_info = self.model(
+                image,
+                depth_image,
+                left_states,
+                right_states,
+                robot_base=robot_base,
+                robot_head=robot_head,
+                base_velocity=base_velocity,
+                command_embedding=None,
+            )
 
             return a_hat
 
@@ -89,17 +122,21 @@ class DiffusionPolicy(nn.Module):
     def configure_optimizers(self):
         return self.optimizer
 
-    def __call__(self, image, depth_image, robot_state, actions=None, action_is_pad=None):
+    def __call__(
+        self, image, depth_image, robot_state, actions=None, action_is_pad=None
+    ):
         B = robot_state.shape[0]
         if actions is not None:
-            noise, noise_pred = self.model(image, depth_image, robot_state, actions, action_is_pad)
+            noise, noise_pred = self.model(
+                image, depth_image, robot_state, actions, action_is_pad
+            )
             # L2 loss
-            all_l2 = F.mse_loss(noise_pred, noise, reduction='none')
+            all_l2 = F.mse_loss(noise_pred, noise, reduction="none")
             loss = (all_l2 * ~action_is_pad.unsqueeze(-1)).mean()
 
             loss_dict = {}
-            loss_dict['l2_loss'] = loss
-            loss_dict['loss'] = loss
+            loss_dict["l2_loss"] = loss
+            loss_dict["loss"] = loss
             return loss_dict, (noise, noise_pred)
         else:  # inference time
             return self.model(image, depth_image, robot_state, actions, action_is_pad)
@@ -117,14 +154,17 @@ class CNNMLPPolicy(nn.Module):
         model, optimizer = build_CNNMLP_model_and_optimizer(args_override)
         self.model = model  # decoder
         self.optimizer = optimizer
-        self.loss_function = args_override['loss_function']
+        self.loss_function = args_override["loss_function"]
 
     # 而 __call__ 在对象被调用时执行
-    def __call__(self, image, depth_image, robot_state, actions=None, action_is_pad=None):
+    def __call__(
+        self, image, depth_image, robot_state, actions=None, action_is_pad=None
+    ):
         env_state = None  # TODO
 
-        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                         std=[0.229, 0.224, 0.225])
+        normalize = transforms.Normalize(
+            mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+        )
         depth_normalize = transforms.Normalize(mean=[0.5], std=[0.5])
         image = normalize(image)  # 图像归一化
         if depth_image is not None:
@@ -134,20 +174,22 @@ class CNNMLPPolicy(nn.Module):
             a_hat = self.model(image, depth_image, robot_state, actions, action_is_pad)
 
             # 均方误差
-            if self.loss_function == 'l1':
+            if self.loss_function == "l1":
                 mse = F.l1_loss(actions, a_hat)
-            elif self.loss_function == 'l2':
+            elif self.loss_function == "l2":
                 mse = F.mse_loss(actions, a_hat)
             else:
                 mse = F.smooth_l1_loss(actions, a_hat)
 
             loss_dict = dict()
-            loss_dict['mse'] = mse
-            loss_dict['loss'] = loss_dict['mse']
+            loss_dict["mse"] = mse
+            loss_dict["loss"] = loss_dict["mse"]
             return loss_dict, a_hat
 
         else:  # inference time
-            a_hat = self.model(image, depth_image, robot_state)  # no action, sample from prior
+            a_hat = self.model(
+                image, depth_image, robot_state
+            )  # no action, sample from prior
 
             return a_hat
 

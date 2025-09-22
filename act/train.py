@@ -116,6 +116,12 @@ def initialize_policy_config(args):
 def train(args):
     set_seed(args.seed)
 
+    # CUDA内存优化
+    torch.cuda.empty_cache()
+    if torch.cuda.is_available():
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
+
     task_config = {
         "dataset_dir": (
             args.datasets if sys.stdin.isatty() else Path.joinpath(ROOT, args.datasets)
@@ -297,9 +303,6 @@ def forward_pass(policy_config, data, policy):
         image_depth_data,
         left_states_data,
         right_states_data,
-        robot_base_data,
-        robot_head_data,
-        base_velocity_data,
         action_data,
         is_pad_action,
     ) = data
@@ -309,9 +312,6 @@ def forward_pass(policy_config, data, policy):
         image_depth_data,
         left_states_data,
         right_states_data,
-        robot_base_data,
-        robot_head_data,
-        base_velocity_data,
         action_data,
         is_pad_action,
     ]
@@ -323,9 +323,6 @@ def forward_pass(policy_config, data, policy):
         image_depth_data,
         left_states_data,
         right_states_data,
-        robot_base_data,
-        robot_head_data,
-        base_velocity_data,
         action_data,
         is_pad_action,
     ) = device_data
@@ -335,21 +332,29 @@ def forward_pass(policy_config, data, policy):
     )
 
     if policy_config["policy_class"] == "ACT":
-        return policy(
+        result = policy(
             image_data,
             image_depth_data,
             left_states_data,
             right_states_data,
-            robot_base_data,
-            robot_head_data,
-            base_velocity_data,
-            action_data,
-            is_pad_action,
+            robot_base=None,
+            robot_head=None,
+            base_velocity=None,
+            actions=action_data,
+            action_is_pad=is_pad_action,
         )
     else:
-        return policy(
+        result = policy(
             image_data, image_depth_data, left_states_data, action_data, is_pad_action
         )
+
+    # 处理返回值不一致的问题
+    if isinstance(result, tuple) and len(result) == 2:
+        return result  # 正常情况：(loss_dict, a_hat)
+    else:
+        # 推理模式只返回a_hat，创建一个虚拟的loss_dict
+        dummy_loss_dict = {"loss": torch.tensor(0.0, device=result.device)}
+        return dummy_loss_dict, result
 
 
 def save_checkpoint(policy, ckpt_dir, ckpt_name, epoch, is_best=False, min_epoch=0):

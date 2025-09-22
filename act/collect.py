@@ -38,7 +38,7 @@ exit_flag = False
 # 信号处理函数
 def signal_handler(signum, frame):
     global exit_flag
-    print("\n检测到Ctrl+C信号，正在安全退出...")
+    print("\nCtrl+C signal detected, exiting safely...")
     exit_flag = True
     # 不要在这里直接退出，让主程序正常清理
 
@@ -134,11 +134,11 @@ def collect_detect(args, start_episode, voice_engine, ros_operator):
 
             if 0 in triggered:
                 init_done = True
-                # 使用机器人按下按钮时的实际位置作为初始位置
-                init_pos = action.copy()  # 记录当前实际的关节位置
+                # use the actual position of the robot when the button is pressed as the initial position
+                init_pos = action.copy()  # record the actual joint position
                 print(
                     f"✅ Button pressed! Initial position recorded: {init_pos[:7]}"
-                )  # 只显示前7个关节
+                )  # only show the first 7 joints
                 print("🚀 Starting immediate data collection...")
             if 2 in triggered:
                 delete_idx = start_episode - 1
@@ -153,7 +153,7 @@ def collect_detect(args, start_episode, voice_engine, ros_operator):
                 pass
             rate.sleep()
 
-        # 如果是因为Ctrl+C退出，直接返回False
+        # if because Ctrl+C exit, return False
         if exit_flag or not rclpy.ok():
             return False
 
@@ -173,16 +173,16 @@ def collect_information(args, ros_operator, voice_engine, episode_number):
     # gripper_idx = [6, 13]
     # gripper_close = -2.1
 
-    # 修复轨迹连续性：使用按钮按下时的位置作为第一帧
+    # fix the trajectory continuity: use the position recorded when the button is pressed as the first frame
     global init_pos
     print("🎯 Recording first frame using button-press position for continuity...")
 
-    # 获取当前观测数据
+    # get the current observation data
     obs_dict = ros_operator.get_observation(ts=0)
     if obs_dict is not None:
-        # 第一帧：使用按钮按下时记录的位置作为动作（确保连续性）
+        # first frame: use the position recorded when the button is pressed as the action (ensure continuity)
         action = init_pos.copy()
-        action_eef = deepcopy(obs_dict["eef"])  # EEF使用当前观测
+        action_eef = deepcopy(obs_dict["eef"])  # EEF use the current observation
 
         timesteps.append(obs_dict)
         actions.append(action)
@@ -192,7 +192,7 @@ def collect_information(args, ros_operator, voice_engine, episode_number):
         print(f"✅ Frame 0 - Button position: {action[:7]}")
         print(f"📊 Frame 0 - Current observation: {obs_dict['qpos'][:7]}")
 
-        # 计算位置差异，检查是否有跳跃
+        # calculate the position difference, check if there is a jump
         pos_diff = np.array(obs_dict["qpos"]) - np.array(action)
         max_diff = np.max(np.abs(pos_diff))
         print(f"📈 Position difference: max={max_diff:.4f}, diff={pos_diff[:7]}")
@@ -203,7 +203,7 @@ def collect_information(args, ros_operator, voice_engine, episode_number):
                 "   This suggests robot moved between button press and data collection."
             )
 
-        # 播放语音提示（异步，不阻塞数据采集）
+        # play the voice (asynchronous, not blocking data collection)
         voice_process_async(voice_engine, f"{episode_number % 100}")
         voice_process_async(voice_engine, "go")
     else:
@@ -214,49 +214,49 @@ def collect_information(args, ros_operator, voice_engine, episode_number):
         obs_dict = ros_operator.get_observation(ts=count)
         action_dict = ros_operator.get_action()
 
-        # 同步帧检测 - 减少丢弃帧数
+        # synchronization frame detection - reduce the number of dropped frames
         if obs_dict is None or action_dict is None:
             print(f"Synchronization frame {count} - waiting for data...")
             rate.sleep()
             continue
 
-        # 获取动作和观察值
+        # get the action and observation value
         action = deepcopy(obs_dict["qpos"])
         action_eef = deepcopy(obs_dict["eef"])
 
-        # 夹爪动作处理
+        # gripper action processing
         # for idx in gripper_idx:
         #     action[idx] = 0 if action[idx] > gripper_close else action[idx]
         #     action_eef[idx] = 0 if action_eef[idx] > gripper_close else action_eef[idx]
 
-        # 检查是否超过2s，并判断是否应该停止
+        # check if it exceeds 2s, and determine whether to stop
         if count > args.frame_rate * 2:
             if all(abs(val - init) <= 0.05 for val, init in zip(action, init_pos)):
-                # 检测到回到初始位置，开始计时保持2秒
+                # detected return to initial position, start timing to keep 2 seconds
                 if return_home_start_time is None:
                     return_home_start_time = time.time()
                     print(
                         "Detected return to home position, keeping recording for 2 more seconds..."
                     )
 
-                # 检查是否已经保持2秒
+                # check if it has kept 2 seconds
                 if time.time() - return_home_start_time >= 2.0:
                     print(
                         "2 seconds elapsed after returning home, stopping recording..."
                     )
                     break
             else:
-                # 如果偏离了初始位置，重置计时器
+                # if it deviates from the initial position, reset the timer
                 if return_home_start_time is not None:
                     return_home_start_time = None
 
-        # 轨迹连续性检查（从第二帧开始）
+        # trajectory continuity check (from the second frame)
         if count > 0 and len(actions) > 0:
             prev_action = actions[-1]
             action_diff = np.array(action) - np.array(prev_action)
             max_diff = np.max(np.abs(action_diff))
 
-            if max_diff > 0.2:  # 超过0.2弧度的跳跃
+            if max_diff > 0.2:  # exceeds 0.2 radian jump
                 print(
                     f"⚠️ Frame {count}: Large trajectory jump detected! Max diff: {max_diff:.4f}"
                 )
@@ -264,7 +264,7 @@ def collect_information(args, ros_operator, voice_engine, episode_number):
                 print(f"   Current:  {action[:7]}")
                 print(f"   Diff:     {action_diff[:7]}")
 
-        # 收集数据
+        # collect data
         timesteps.append(obs_dict)
         actions.append(action)
         actions_eef.append(action_eef)
@@ -373,7 +373,7 @@ def save_data(
 ):
     data_size = len(actions)
 
-    # 数据字典
+    # data dictionary
     data_dict = {
         "/observations/qpos": [],
         "/observations/qvel": [],
@@ -416,9 +416,6 @@ def save_data(
         data_dict, args.camera_names, args.use_depth_image
     )
 
-    # 文本的属性：
-    # 1 是否仿真
-    # 2 图像是否压缩
     t0 = time.time()
     create_and_write_hdf5(
         args, data_dict, dataset_path, data_size, padded_size, padded_size_depth
@@ -449,7 +446,7 @@ def main(args):
     num_episodes = args.num_episodes if args.episode_idx == -1 else 1
     current_episode = 0 if args.episode_idx == -1 else args.episode_idx
 
-    # 查找最大episode序号
+    # find the maximum episode number
     max_episode = -1
     if os.path.exists(datasets_dir):
         for filename in os.listdir(datasets_dir):
@@ -460,7 +457,7 @@ def main(args):
                 except ValueError:
                     continue
 
-    # 如果找到了已存在的episode，从最大序号的下一个开始
+    # if the existing episode is found, start from the next maximum number
     if max_episode >= 0:
         current_episode = max_episode + 1
 
@@ -468,7 +465,7 @@ def main(args):
     while episode_num < num_episodes and rclpy.ok() and not exit_flag:
         print(f"Episode {episode_num}")
         if not collect_detect(args, current_episode, voice_engine, ros_operator):
-            print("数据采集被用户中断")
+            print("Data collection interrupted by user")
             break
 
         print(f"Start to record episode {current_episode}")
@@ -506,7 +503,7 @@ def main(args):
 def parse_arguments(known=False):
     parser = argparse.ArgumentParser()
 
-    # 数据集配置
+    # dataset configuration
     parser.add_argument(
         "--datasets",
         type=str,
@@ -520,7 +517,7 @@ def parse_arguments(known=False):
     parser.add_argument("--max_timesteps", type=int, default=1800, help="max timesteps")
     parser.add_argument("--frame_rate", type=int, default=60, help="frame rate")
 
-    # 配置文件
+    # configuration file
     parser.add_argument(
         "--config",
         type=str,
@@ -528,7 +525,7 @@ def parse_arguments(known=False):
         help="config file",
     )
 
-    # 图像处理选项
+    # image processing options
     parser.add_argument(
         "--camera_names",
         nargs="+",
@@ -552,7 +549,7 @@ def parse_arguments(known=False):
         help="record data",
     )
 
-    # 数据采集选项
+    # data collection options
     parser.add_argument("--key_collect", action="store_true", help="use key collect")
 
     parser.add_argument("--task", type=str, default="", help="task name")

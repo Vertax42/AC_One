@@ -190,7 +190,7 @@ venv.bak/
 logs/
 log/
 *.log.*
-
+*.zip
 # log4z generated logs
 *.lgz
 *.txt.log
